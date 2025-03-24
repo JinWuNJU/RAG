@@ -41,7 +41,7 @@
     ```bash
     pip install -r requirements.txt
     ```
-    2. （若需要）填写
+    2. （若需要）在环境变量中填写LLM API KEY
     3. 启动服务器:
     ```bash
     make server
