@@ -1,0 +1,11 @@
+services:
+  paradedb:
+    image: oaklight/vectorsearch:latest-pg17
+    container_name: vectorsearch
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?error}
+      POSTGRES_DB: RAG
+    ports:
+      - 5432:5432
+    volumes:
+      - /var/lib/postgresql/data/:/var/lib/postgresql/data/
