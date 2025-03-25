@@ -5,3 +5,6 @@ uvicorn==0.34.0
 openai==1.68.2
 ragas==0.2.14
 SQLAlchemy==2.0.39
+python-multipart==0.0.19
+psycopg2-binary==2.9.9
+python-dotenv==1.0.1

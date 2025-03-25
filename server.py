@@ -4,6 +4,8 @@ from sse_starlette.sse import EventSourceResponse
 from service import chat
 from fastapi.middleware.cors import CORSMiddleware
 
+from service.file import file_router
+
 app = FastAPI()
 
 app.add_middleware(
@@ -15,6 +17,7 @@ app.add_middleware(
 )
 
 app.include_router(chat.router)
+app.include_router(file_router.router)
 
 if __name__ == "__main__":
     import uvicorn
