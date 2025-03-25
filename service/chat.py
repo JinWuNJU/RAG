@@ -3,12 +3,13 @@ import json
 import time
 from typing import List
 import uuid
+from uuid import UUID
 from fastapi import APIRouter
 from sse_starlette import EventSourceResponse
 
 from model.chat.completions import MessagePayload
 from model.chat.history import ChatDetail, ChatHistory, ChatMessage
-from model.chat.sse import DocReturnEvent, Document, RetrieveParams, ToolCallEvent, ToolEvent
+from model.chat.sse import ChatBeginEvent, ChatEvent, DocReturnEvent, Document, RetrieveParams, SseEventPackage, ToolCallEvent, ToolEvent
 
 
 
@@ -135,11 +136,12 @@ mock_tooluse: List[ToolEvent] = [
     )
 ]
 
+mock_history_counter = 0
 # 模拟对话历史 - 包含多轮对话和追问场景
 mock_history: List[ChatHistory] = [
     ChatHistory(
         id=uuid.uuid4(),
-        title="定态薛定谔方程和量子谐振子",
+        title=f"{(mock_history_counter:= mock_history_counter + 1)} 定态薛定谔方程和量子谐振子",
         chat=ChatDetail(
             messages= [
                 # 初始对话
@@ -173,14 +175,6 @@ mock_history: List[ChatHistory] = [
                     content=mock_answer + " （编辑后的版本二回答）",
                     tooluse=mock_tooluse,
                     timestamp=174257130
-                ),
-                # 对第一轮回答的追问
-                ChatMessage(
-                    parentId=answer_id_1,
-                    id=uuid.uuid4(),
-                    role="user",
-                    content=mock_query + " （追问版本一回答）",
-                    timestamp=174257131
                 )
             ]
         ),
@@ -211,26 +205,30 @@ async def get_history(page: int = 1):
     
 
 # 模拟SSE事件流
-async def event_generator():
+async def event_generator(chat_id: UUID, user_message_id: UUID, assistant_message_id: UUID):
     # 先发送工具调用事件
+    yield SseEventPackage(
+        ChatBeginEvent(
+            chat_id=chat_id,
+            user_message_id=user_message_id,
+            assistant_message_id=assistant_message_id
+        )
+    )
     for tool in mock_tooluse:
-        yield {
-            "event": tool.type, 
-            "data": tool.model_dump_json()
-        }
+        yield SseEventPackage(
+            tool
+        )
         await asyncio.sleep(.1) # 模拟延迟
     
     # 分段发送回答内容
     for i in range(0, len(mock_answer), 8):
         chunk = mock_answer[i:i+8]
-        yield {
-            "event": "chat", 
-            "data": json.dumps({ "content": chunk }, ensure_ascii=False)
-        }
+        yield SseEventPackage(
+            ChatEvent(
+                content=chunk
+            )
+        )
         await asyncio.sleep(.05)
-    
-    # 结束事件
-    yield {"event": "end", "data": "[END]"}
 
 
 # 处理用户消息并返回SSE事件流
@@ -241,24 +239,26 @@ async def message_stream(payload: MessagePayload):
     new_message: List[ChatMessage] = [
         ChatMessage(
             parentId=None,
-            id=(user_chat_id := uuid.uuid4()),
+            id=(user_message_id := uuid.uuid4()),
             role="user",
             content=payload.content,
             timestamp=current_timestamp
         ),
         ChatMessage(
-            parentId=user_chat_id,
-            id=uuid.uuid4(),
+            parentId=user_message_id,
+            id=(assistant_message_id := uuid.uuid4()),
             role="assistant",
             content=mock_answer,
             tooluse=mock_tooluse,
             timestamp=current_timestamp
         )
     ]
+    chat_id = uuid.uuid4()
     # 查找父消息并更新对话历史
     for history in mock_history:
         for chat in history.chat.messages:
             if str(chat.id) == payload.parentId:
+                chat_id = history.id
                 new_message[0].parentId = chat.id
                 history.chat.messages = history.chat.messages + new_message
                 new_chat = False
@@ -267,10 +267,10 @@ async def message_stream(payload: MessagePayload):
     # 如果是新对话，插入到历史记录中
     if new_chat:
         mock_history.insert(0, ChatHistory(
-            id=uuid.uuid4(),
+            id=chat_id,
             title="定态薛定谔方程和量子谐振子",
             chat=ChatDetail(messages=new_message),
             updated_at=current_timestamp,
             created_at=current_timestamp
         ))
-    return EventSourceResponse(event_generator())
+    return EventSourceResponse(event_generator(chat_id, user_message_id, assistant_message_id))
