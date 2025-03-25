@@ -1,0 +1,276 @@
+import asyncio
+import json
+import time
+from typing import List
+import uuid
+from fastapi import APIRouter
+from sse_starlette import EventSourceResponse
+
+from model.chat.completions import MessagePayload
+from model.chat.history import ChatDetail, ChatHistory, ChatMessage
+from model.chat.sse import DocReturnEvent, Document, RetrieveParams, ToolCallEvent, ToolEvent
+
+
+
+# Mock数据说明：
+# 以下mock数据用于模拟一个物理问答系统的典型交互流程，包含：
+# 1. 用户查询：关于量子谐振子的物理问题
+# 2. 工具调用：模拟知识库检索过程
+# 3. 回答内容：包含公式和解释的完整回答
+# 4. 对话历史：模拟多轮对话场景
+
+# 模拟用户查询
+mock_query = r"举出量子力学中一维无限深势阱中粒子的能量本征值和波函数问题"
+
+# 模拟AI回答 - 包含公式和解释的完整回答
+mock_answer = r'''
+以下以“量子力学中一维无限深势阱中粒子的能量本征值和波函数问题”为例，这是前沿物理教材中较为经典且复杂的内容：
+
+**问题描述**： 考虑一个质量为 $m$ 的粒子处于一维无限深势阱中，势阱的范围是 $0 < x < a$，势函数为
+\[
+V(x) = \begin{cases}
+0, & 0 < x < a \\
+\infty, & x \leq 0, x \geq a
+\end{cases}
+\]
+求粒子的能量本征值和对应的波函数。
+
+**公式解答**：
+根据定态薛定谔方程：
+\[
+-\frac{\hbar^2}{2m}\frac{d^2\psi(x)}{dx^2} + V(x)\psi(x) = E\psi(x)
+\]
+在势阱外（$x \leq 0$ 或 $x \geq a$），由于 $V(x)=\infty$，要使方程有解，只能 $\psi(x)=0$。
+在势阱内（$0 < x < a$），$V(x) = 0$，薛定谔方程变为：
+\[
+-\frac{\hbar^2}{2m}\frac{d^2\psi(x)}{dx^2} = E\psi(x)
+\]
+令 $k^2 = \frac{2mE}{\hbar^2}$，则方程变为：
+\[
+\frac{d^2\psi(x)}{dx^2} + k^2\psi(x) = 0
+\]
+其通解为：
+\[
+\psi(x) = A\sin(kx) + B\cos(kx)
+\]
+根据边界条件 $\psi(0) = 0$，可得：
+\[
+\psi(0) = A\sin(0) + B\cos(0) = B = 0
+\]
+再根据边界条件 $\psi(a) = 0$，可得：
+\[
+\psi(a) = A\sin(ka) = 0
+\]
+因为 $A \neq 0$（否则波函数恒为零），所以 $ka = n\pi$，$n = 1, 2, 3, \cdots$，即 $k = \frac{n\pi}{a}$。
+由 $k^2 = \frac{2mE}{\hbar^2}$，可得能量本征值：
+\[
+E_n = \frac{n^2\pi^2\hbar^2}{2ma^2}, \quad n = 1, 2, 3, \cdots
+\]
+对应的波函数为：
+\[
+\psi_n(x) = \sqrt{\frac{2}{a}}\sin\left(\frac{n\pi x}{a}\right), \quad n = 1, 2, 3, \cdots
+\]
+这里 $\sqrt{\frac{2}{a}}$ 是归一化常数，通过 $\int_{0}^{a}|\psi_n(x)|^2dx = 1$ 得到。
+
+**Python 计算（以计算前几个能量本征值和绘制前几个波函数为例）**：
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+
+# 常数
+hbar = 1.054571817e-34  # 约化普朗克常数，单位 J·s
+m = 1.674927498e-27  # 粒子质量，这里假设为质子质量，单位 kg
+a = 1e-10  # 势阱宽度，单位 m
+
+# 计算能量本征值
+def energy(n):
+    return (n ** 2) * (np.pi ** 2) * (hbar ** 2) / (2 * m * (a ** 2))
+
+# 计算波函数
+def wave_function(n, x):
+    return np.sqrt(2 / a) * np.sin(n * np.pi * x / a)
+
+# 计算前 5 个能量本征值
+n_values = np.arange(1, 6)
+energies = [energy(n) for n in n_values]
+print("能量本征值：", energies)
+
+# 绘制前 3 个波函数
+x = np.linspace(0, a, 1000)
+for n in range(1, 4):
+    psi = wave_function(n, x)
+    plt.plot(x, psi, label=f"n = {n}")
+
+plt.xlabel('x')
+plt.ylabel('波函数 $\psi(x)$')
+plt.title('一维无限深势阱波函数')
+plt.legend()
+plt.show()
+```
+
+上述代码首先定义了相关的物理常数，然后定义了计算能量本征值和波函数的函数。接着计算了前 5 个能量本征值并打印出来，最后绘制了前 3 个波函数的图像。 
+'''
+
+
+# 工具调用过程 - 包含检索和文档返回两个阶段
+mock_tooluse: List[ToolEvent] = [
+    ToolCallEvent(
+        type="call",
+        name="retrieve",
+        params=RetrieveParams(
+            knowledge_base="physics_textbook",
+            keyword="定态薛定谔方程 量子谐振子"
+        ),
+        description="正在检索定态薛定谔方程和量子谐振子相关内容"
+    ),
+    DocReturnEvent(
+        type="doc",
+        count=10,
+        documents=[
+            Document(
+                snippet="定态薛定谔方程为...",
+                url="http://example.com"
+            ) for _ in range(10)
+        ]
+    )
+]
+
+# 模拟对话历史 - 包含多轮对话和追问场景
+mock_history: List[ChatHistory] = [
+    ChatHistory(
+        id=uuid.uuid4(),
+        title="定态薛定谔方程和量子谐振子",
+        chat=ChatDetail(
+            messages= [
+                # 初始对话
+                ChatMessage(
+                    parentId=None,
+                    id=(root_id := uuid.uuid4()),
+                    role="user",
+                    content=mock_query,
+                    timestamp=174257095
+                ),
+                ChatMessage(
+                    parentId=root_id,
+                    id=(answer_id_1 := uuid.uuid4()),
+                    role="assistant",
+                    content=mock_answer,
+                    tooluse=mock_tooluse,
+                    timestamp=174257099
+                ),
+                # 第二轮对话
+                ChatMessage(
+                    parentId=None,
+                    id=(root_id_2 := uuid.uuid4()),
+                    role="user",
+                    content=mock_query + " （编辑后的版本二查询）",
+                    timestamp=174257120
+                ),
+                ChatMessage(
+                    parentId=root_id_2,
+                    id=uuid.uuid4(),
+                    role="assistant",
+                    content=mock_answer + " （编辑后的版本二回答）",
+                    tooluse=mock_tooluse,
+                    timestamp=174257130
+                ),
+                # 对第一轮回答的追问
+                ChatMessage(
+                    parentId=answer_id_1,
+                    id=uuid.uuid4(),
+                    role="user",
+                    content=mock_query + " （追问版本一回答）",
+                    timestamp=174257131
+                )
+            ]
+        ),
+        updated_at=1742570997,
+        created_at=1742570958
+    ) for _ in range(6)
+]
+
+
+router = APIRouter()
+
+
+# 获取单个对话详情接口
+@router.get("/chats/{chat_id}")
+async def get_chat(chat_id: str) -> ChatHistory | dict:
+    chat = [history for history in mock_history if str(history.id) == chat_id]
+    if not chat:
+        return {}
+    return chat[0]
+
+# 获取对话历史接口 - 支持分页
+@router.get("/chats")
+async def get_history(page: int = 1):
+    page_size = 3  # 让分页更加明显
+    start = (page - 1) * page_size
+    end = start + page_size
+    return mock_history[start:end]
+    
+
+# 模拟SSE事件流
+async def event_generator():
+    # 先发送工具调用事件
+    for tool in mock_tooluse:
+        yield {
+            "event": tool.type, 
+            "data": tool.model_dump_json()
+        }
+        await asyncio.sleep(.1) # 模拟延迟
+    
+    # 分段发送回答内容
+    for i in range(0, len(mock_answer), 8):
+        chunk = mock_answer[i:i+8]
+        yield {
+            "event": "chat", 
+            "data": json.dumps({ "content": chunk }, ensure_ascii=False)
+        }
+        await asyncio.sleep(.05)
+    
+    # 结束事件
+    yield {"event": "end", "data": "[END]"}
+
+
+# 处理用户消息并返回SSE事件流
+@router.post("/completions")
+async def message_stream(payload: MessagePayload):
+    current_timestamp = int(time.time())
+    new_chat = True
+    new_message: List[ChatMessage] = [
+        ChatMessage(
+            parentId=None,
+            id=(user_chat_id := uuid.uuid4()),
+            role="user",
+            content=payload.content,
+            timestamp=current_timestamp
+        ),
+        ChatMessage(
+            parentId=user_chat_id,
+            id=uuid.uuid4(),
+            role="assistant",
+            content=mock_answer,
+            tooluse=mock_tooluse,
+            timestamp=current_timestamp
+        )
+    ]
+    # 查找父消息并更新对话历史
+    for history in mock_history:
+        for chat in history.chat.messages:
+            if str(chat.id) == payload.parentId:
+                new_message[0].parentId = chat.id
+                history.chat.messages = history.chat.messages + new_message
+                new_chat = False
+                history.updated_at = current_timestamp
+                break
+    # 如果是新对话，插入到历史记录中
+    if new_chat:
+        mock_history.insert(0, ChatHistory(
+            id=uuid.uuid4(),
+            title="定态薛定谔方程和量子谐振子",
+            chat=ChatDetail(messages=new_message),
+            updated_at=current_timestamp,
+            created_at=current_timestamp
+        ))
+    return EventSourceResponse(event_generator())
