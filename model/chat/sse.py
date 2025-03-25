@@ -1,4 +1,6 @@
+from abc import ABC
 from typing import List, Literal, Annotated
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -34,10 +36,19 @@ class ChatEvent(BaseEvent):
     type: Annotated[str, Literal["chat"]] = "chat"
     content: str = Field(..., description="聊天内容")
 
-class EndEvent(BaseEvent):
-    """SSE结束事件"""
-    type: Annotated[str, Literal["end"]] = "end"
-    data: Literal["[END]"] = "[END]"
+class ChatBeginEvent(BaseEvent):
+    """SSE开始事件"""
+    type: Annotated[str, Literal["begin"]] = "begin"
+    chat_id: UUID
+    user_message_id: UUID
+    assistant_message_id: UUID
+
 
 ToolEvent = ToolCallEvent | DocReturnEvent
-SseEvent = ToolEvent | ChatEvent | EndEvent
+SseEvent = ToolEvent | ChatEvent | ChatBeginEvent
+
+def SseEventPackage(event: SseEvent) -> dict:
+    return {
+        "event": event.type,
+        "data": event.model_dump_json()
+    }
