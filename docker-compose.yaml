@@ -4,8 +4,29 @@ services:
     container_name: vectorsearch
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?error}
-      POSTGRES_DB: RAG
+      POSTGRES_DB: ${DB_NAME}
     ports:
-      - 5432:5432
+      - ${PG_HOST_PORT}:5432
     volumes:
       - /var/lib/postgresql/data/:/var/lib/postgresql/data/
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: pgbouncer
+    environment:
+      DB_HOST: localhost
+      DB_PORT: ${PG_HOST_PORT}
+      DB_USER: dbuser
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?error}
+      DB_NAME: ${DB_NAME}
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 100
+      DEFAULT_POOL_SIZE: 20
+    ports:
+      - 5432:6432
+    depends_on:
+      - vectorsearch
+
+x-variables:
+  DB_NAME: RAG
+  PG_HOST_PORT: 15432
