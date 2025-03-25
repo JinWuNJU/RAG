@@ -135,11 +135,12 @@ mock_tooluse: List[ToolEvent] = [
     )
 ]
 
+mock_history_counter = 0
 # 模拟对话历史 - 包含多轮对话和追问场景
 mock_history: List[ChatHistory] = [
     ChatHistory(
         id=uuid.uuid4(),
-        title="定态薛定谔方程和量子谐振子",
+        title=f"{(mock_history_counter:= mock_history_counter + 1)} 定态薛定谔方程和量子谐振子",
         chat=ChatDetail(
             messages= [
                 # 初始对话
@@ -173,14 +174,6 @@ mock_history: List[ChatHistory] = [
                     content=mock_answer + " （编辑后的版本二回答）",
                     tooluse=mock_tooluse,
                     timestamp=174257130
-                ),
-                # 对第一轮回答的追问
-                ChatMessage(
-                    parentId=answer_id_1,
-                    id=uuid.uuid4(),
-                    role="user",
-                    content=mock_query + " （追问版本一回答）",
-                    timestamp=174257131
                 )
             ]
         ),
