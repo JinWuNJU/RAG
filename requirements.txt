@@ -5,11 +5,13 @@ uvicorn==0.34.0
 openai==1.68.2
 ragas==0.2.14
 sqlalchemy==2.0.39
-python-dotenv==1.0.1
+python-dotenv~=1.0.0
 psycopg2-binary==2.9.9
-fastapi-jwt-auth==0.5.0
+fastapi-jwt-auth2>=0.5.0
 passlib==1.7.4
 bcrypt==4.0.1
 python-multipart==0.0.19
 python-jose[cryptography]==3.4.0
 alembic==1.13.1
+langchain-community~=0.3.20
+pydantic-settings~=2.8.1
