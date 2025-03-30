@@ -5,7 +5,7 @@ from fastapi_jwt_auth2 import AuthJWT
 from fastapi_jwt_auth2.exceptions import AuthJWTException
 from pydantic import BaseModel
 
-from service import chat
+from service.ai.chat import chat
 from fastapi.middleware.cors import CORSMiddleware
 
 from service.file import file_router
