@@ -1,4 +1,4 @@
-.PHONY: start_db clean_db stop_db server
+.PHONY: start_db clean_db stop_db server build_image
 
 start_db:
 	sudo mkdir -p /var/lib/postgresql/data/
@@ -14,3 +14,6 @@ clean_db:
 
 server:
 	uvicorn server:app --host 0.0.0.0 --port 8000 --reload
+
+build_image:
+	sudo docker build -t pg_roonga_vector:1.0 .

@@ -1,6 +1,6 @@
 services:
   paradedb:
-    image: oaklight/vectorsearch:latest-pg17
+    image: pg_roonga_vector:1.0
     container_name: vectorsearch
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?error}
