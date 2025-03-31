@@ -230,7 +230,6 @@ async def event_generator(chat_id: UUID, user_message_id: UUID, assistant_messag
         )
         await asyncio.sleep(.05)
 
-
 # 处理用户消息并返回SSE事件流
 @router.post("/completions")
 async def message_stream(payload: MessagePayload):
@@ -254,23 +253,27 @@ async def message_stream(payload: MessagePayload):
         )
     ]
     chat_id = uuid.uuid4()
-    # 查找父消息并更新对话历史
-    for history in mock_history:
-        for chat in history.chat.messages:
-            if str(chat.id) == payload.parentId:
-                chat_id = history.id
-                new_message[0].parentId = chat.id
-                history.chat.messages = history.chat.messages + new_message
-                new_chat = False
-                history.updated_at = current_timestamp
-                break
-    # 如果是新对话，插入到历史记录中
-    if new_chat:
-        mock_history.insert(0, ChatHistory(
-            id=chat_id,
-            title="定态薛定谔方程和量子谐振子",
-            chat=ChatDetail(messages=new_message),
-            updated_at=current_timestamp,
-            created_at=current_timestamp
-        ))
+    async def update_chat_history(chat_id, mock_history, payload, new_message, current_timestamp):
+        await asyncio.sleep(14)
+        new_chat = True
+        # 查找父消息并更新对话历史
+        for history in mock_history:
+            for chat in history.chat.messages:
+                if str(chat.id) == payload.parentId:
+                    chat_id = history.id
+                    new_message[0].parentId = chat.id
+                    history.chat.messages = history.chat.messages + new_message
+                    new_chat = False
+                    history.updated_at = current_timestamp
+                    break
+        # 如果是新对话，插入到历史记录中
+        if new_chat:
+            mock_history.insert(0, ChatHistory(
+                id=chat_id,
+                title="定态薛定谔方程和量子谐振子",
+                chat=ChatDetail(messages=new_message),
+                updated_at=current_timestamp,
+                created_at=current_timestamp
+            ))
+    asyncio.create_task(update_chat_history(chat_id, mock_history, payload, new_message, current_timestamp))
     return EventSourceResponse(event_generator(chat_id, user_message_id, assistant_message_id))
