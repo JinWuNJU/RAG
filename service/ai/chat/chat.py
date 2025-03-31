@@ -235,45 +235,48 @@ async def event_generator(chat_id: UUID, user_message_id: UUID, assistant_messag
 async def message_stream(payload: MessagePayload):
     current_timestamp = int(time.time())
     new_chat = True
-    new_message: List[ChatMessage] = [
-        ChatMessage(
+    new_user_message = ChatMessage(
             parentId=None,
             id=(user_message_id := uuid.uuid4()),
             role="user",
             content=payload.content,
             timestamp=current_timestamp
-        ),
-        ChatMessage(
-            parentId=user_message_id,
-            id=(assistant_message_id := uuid.uuid4()),
-            role="assistant",
-            content=mock_answer,
-            tooluse=mock_tooluse,
-            timestamp=current_timestamp
         )
-    ]
+
+    new_assistant_message = ChatMessage(
+        parentId=user_message_id,
+        id=(assistant_message_id := uuid.uuid4()),
+        role="assistant",
+        content=mock_answer,
+        tooluse=mock_tooluse,
+        timestamp=current_timestamp
+    )
+    
     chat_id = uuid.uuid4()
-    async def update_chat_history(chat_id, mock_history, payload, new_message, current_timestamp):
+    for history in mock_history:
+        for chat in history.chat.messages:
+            if str(chat.id) == payload.parentId:
+                new_chat = False
+                chat_id = history.id
+                new_user_message.parentId = chat.id
+                history.chat.messages = history.chat.messages + [new_user_message]
+                history.updated_at = current_timestamp
+                history_item = history
+                break
+    if new_chat:
+        history_item = ChatHistory(
+            id=chat_id,
+            title="定态薛定谔方程和量子谐振子",
+            chat=ChatDetail(messages=[new_user_message]),
+            updated_at=current_timestamp,
+            created_at=current_timestamp
+        )
+        mock_history.insert(0, history_item)
+    async def update_chat_history():
+        nonlocal history_item
+        nonlocal new_assistant_message
         await asyncio.sleep(14)
-        new_chat = True
-        # 查找父消息并更新对话历史
-        for history in mock_history:
-            for chat in history.chat.messages:
-                if str(chat.id) == payload.parentId:
-                    chat_id = history.id
-                    new_message[0].parentId = chat.id
-                    history.chat.messages = history.chat.messages + new_message
-                    new_chat = False
-                    history.updated_at = current_timestamp
-                    break
-        # 如果是新对话，插入到历史记录中
-        if new_chat:
-            mock_history.insert(0, ChatHistory(
-                id=chat_id,
-                title="定态薛定谔方程和量子谐振子",
-                chat=ChatDetail(messages=new_message),
-                updated_at=current_timestamp,
-                created_at=current_timestamp
-            ))
-    asyncio.create_task(update_chat_history(chat_id, mock_history, payload, new_message, current_timestamp))
+        history_item.chat.messages = history_item.chat.messages + [new_assistant_message]
+
+    asyncio.create_task(update_chat_history())
     return EventSourceResponse(event_generator(chat_id, user_message_id, assistant_message_id))
