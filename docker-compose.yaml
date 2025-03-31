@@ -1,5 +1,5 @@
 services:
-  paradedb:
+  pg:
     image: pg_roonga_vector:1.0
     container_name: vectorsearch
     environment:
@@ -25,7 +25,7 @@ services:
     ports:
       - 5432:6432
     depends_on:
-      - vectorsearch
+      - pg
 
 x-variables:
   DB_NAME: RAG
