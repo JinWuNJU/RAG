@@ -254,15 +254,17 @@ async def message_stream(payload: MessagePayload):
     
     chat_id = uuid.uuid4()
     for history in mock_history:
-        for chat in history.chat.messages:
-            if str(chat.id) == payload.parentId:
-                new_chat = False
-                chat_id = history.id
-                new_user_message.parentId = chat.id
-                history.chat.messages = history.chat.messages + [new_user_message]
-                history.updated_at = current_timestamp
-                history_item = history
-                break
+        if payload.chatId and str(history.id) == payload.chatId:
+            for chat in history.chat.messages:
+                if str(chat.id) == payload.parentId:
+                    new_user_message.parentId = chat.id
+                    break
+            new_chat = False
+            chat_id = history.id
+            history.chat.messages = history.chat.messages + [new_user_message]
+            history.updated_at = current_timestamp
+            history_item = history
+
     if new_chat:
         history_item = ChatHistory(
             id=chat_id,
