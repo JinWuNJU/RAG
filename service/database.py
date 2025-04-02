@@ -1,19 +1,35 @@
 import os
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+# 加载环境变量
+load_dotenv()
 
-PG_HOST = os.getenv("PG_HOST", "172.29.4.37")
-PG_PORT = os.getenv("PG_PORT", "5432")
-PG_USER = os.getenv("PG_USER", "postgres")
-PG_PASSWORD = os.getenv("PG_PASSWORD", "hk1Aut9FSBAJoB")
-PG_DATABASE = os.getenv("PG_DATABASE", "RAG")
+# 构建连接URL
+def get_db_url():
+    return f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASS')}@" \
+           f"{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}" \
+           f"?sslmode={os.getenv('DB_SSL_MODE', 'prefer')}"
 
-DATABASE_URL = f"postgresql://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:{PG_PORT}/{PG_DATABASE}"
+# 创建引擎（连接池配置）
+engine = create_engine(
+    get_db_url(),
+    pool_size=10,          # 连接池保持的连接数
+    max_overflow=20,       # 超出pool_size时允许的最大连接数
+    pool_pre_ping=True,    # 自动检测连接是否有效
+    pool_recycle=3600,     # 1小时后回收连接（避免数据库超时）
+    connect_args={
+        "connect_timeout": 5,  # 连接超时5秒
+        "application_name": "RAG_APP"  # 在PG中标识连接来源
+    }
+)
 
-engine = create_engine(DATABASE_URL)
-
+# 会话工厂
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# ORM基类
+Base = declarative_base()
 
 def get_db():
     db = SessionLocal()
