@@ -125,41 +125,62 @@ async def list_knowledge_bases(
             detail="Internal server error"
         )
 
-# @router.get("/{knowledge_base_id}", response_model=KnowledgeBaseResponse)
-# def get_knowledge_base(
-#         knowledge_base_id: UUID,
-#         db: Session = Depends(get_db)
-# ):
-#     """
-#     获取知识库详情
-#
-#     参数:
-#     - knowledge_base_id: 知识库唯一ID
-#
-#     功能:
-#     - 查询指定知识库的详细信息
-#
-#     返回:
-#     - 知识库详情，包括：
-#         - knowledge_base_id: 知识库ID
-#         - name: 名称
-#         - description: 描述
-#         - created_at: 创建时间
-#         - status: 状态
-#         - chunk_size: 分块大小
-#         - overlap_size: 重叠大小
-#         - hybrid_ratio: 混合检索比例
-#
-#     异常:
-#     - 404: 如果指定ID的知识库不存在
-#     """
-#     # 查询知识库
-#     kb = db.query(KnowledgeBase).get(knowledge_base_id)
-#     if not kb:
-#         raise HTTPException(status_code=404, detail="Knowledge base not found")
-#     return kb
-#
-#
+@router.get("/{knowledge_base_id}",response_model=KnowledgeBaseDetailResponse)
+async def get_knowledge_base_detail(
+    knowledge_base_id: UUID,
+    db: Session = Depends(get_db)
+) -> KnowledgeBaseDetailResponse:
+    """
+    获取知识库详情API
+
+    参数:
+    - knowledge_base_id: 知识库唯一标识(UUID格式)
+
+    返回:
+    - KnowledgeBaseDetailResponse: 知识库详细信息，包含:
+      - knowledge_base_id: 知识库唯一标识
+      - name: 知识库名称
+      - description: 知识库描述（可选）
+      - created_at: 创建时间(ISO 8601格式)
+      - status: 知识库状态（building/completed/partial_completed）
+      - chunk_size: 文档分块大小
+      - overlap_size: 分块重叠大小
+      - hybrid_ratio: 混合检索比例
+
+
+    错误码:
+    - 404: 知识库不存在
+    - 500: 服务器内部错误
+    """
+    try:
+        # 查询知识库详情
+        kb = db.query(KnowledgeBase).filter_by(id=knowledge_base_id).first()
+        if not kb:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Knowledge base {knowledge_base_id} not found"
+            )
+
+        return KnowledgeBaseDetailResponse(
+            knowledge_base_id=kb.id,
+            name=kb.name,
+            description=kb.description,
+            created_at=kb.created_at,
+            status=kb.status,
+            chunk_size=kb.chunk_size,
+            overlap_size=kb.overlap_size,
+            hybrid_ratio=kb.hybrid_ratio
+        )
+
+    except HTTPException:
+        raise  # 直接抛出已知的HTTP异常
+    except Exception as e:
+        logger.error(f"获取知识库详情失败: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error"
+        )
+
 # @router.post("/{knowledge_base_id}/search", response_model=List[KnowledgeBaseSearchResult])
 # def search_knowledge_base(
 #         knowledge_base_id: UUID,

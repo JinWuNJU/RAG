@@ -31,6 +31,21 @@ class KnowledgeBaseListItem(BaseModel):
             datetime: lambda v: v.isoformat()  # 确保datetime序列化
         }
 
+class KnowledgeBaseDetailResponse(BaseModel):
+    """知识库列表项响应模型"""
+    knowledge_base_id: UUID
+    name: str
+    description: Optional[str]
+    created_at: datetime
+    status: str  # "building" 或 "completed"
+    chunk_size: int
+    overlap_size: int
+    hybrid_ratio: float
+
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()  # 确保datetime序列化
+        }
 
 class KnowledgeBaseSearchResult(BaseModel):
     """知识库搜索结果模型"""
