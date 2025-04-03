@@ -5,6 +5,7 @@ uvicorn==0.34.0
 openai==1.68.2
 ragas==0.2.14
 sqlalchemy==2.0.39
+pgvector==0.4.0
 python-dotenv~=1.0.0
 psycopg2-binary==2.9.9
 fastapi-jwt-auth2>=0.5.0
@@ -16,3 +17,5 @@ alembic==1.13.1
 langchain-community~=0.3.20
 pydantic-settings~=2.8.1
 git+ssh://git@172.29.4.49:8888/2025seiii-ThunderForce/smolagents-fork.git # smolagents
+jieba==0.42.1               # 中文分词核心库
+loguru==0.7.2
