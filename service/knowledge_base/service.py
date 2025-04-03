@@ -32,7 +32,24 @@ class TextFileProcessor:
                 logger.error(f"文件 {file_id} 处理失败: {str(e)}")
                 continue
 
+        # 更新知识库状态
+        try:
+            if success_count == len(file_ids):  # 所有文件处理成功
+                kb.status = "completed"
+                logger.success(f"所有文件处理完成，知识库 {kb_id} 状态已更新为 completed")
+            else:
+                kb.status = "partial_completed"  # 可选：添加部分完成状态
+                logger.warning(f"部分文件处理完成，知识库 {kb_id} 状态为 partial_completed")
+
+            self.db.commit()
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"更新知识库状态失败: {str(e)}")
+            raise
+
         logger.success(f"处理完成: 成功 {success_count}/{len(file_ids)} 个文件")
+
+
 
     async def _process_single_file(self, file_id: UUID, kb: KnowledgeBase) -> bool:
         """处理单个文本文件"""

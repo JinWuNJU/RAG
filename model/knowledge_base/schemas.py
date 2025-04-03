@@ -18,13 +18,18 @@ class KnowledgeBaseCreateResponse(BaseModel):
     knowledge_base_id: UUID
     status: str
 
-class KnowledgeBaseResponse(BaseModel):
-    """知识库响应模型"""
+class KnowledgeBaseListItem(BaseModel):
+    """知识库列表项响应模型"""
     knowledge_base_id: UUID
     name: str
     description: Optional[str]
     created_at: datetime
-    status: str
+    status: str  # "building" 或 "completed"
+
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()  # 确保datetime序列化
+        }
 
 
 class KnowledgeBaseSearchResult(BaseModel):

@@ -48,7 +48,8 @@ async def create_knowledge_base(
         kb = KnowledgeBase(
             name=data.name,
             chunk_size=data.chunk_size,
-            overlap_size=data.overlap_size
+            overlap_size=data.overlap_size,
+            description=data.description,
         )
         db.add(kb)
         db.commit()
@@ -72,25 +73,58 @@ async def create_knowledge_base(
         raise HTTPException(500, detail=str(e))
 
 
-# @router.get("/", response_model=List[KnowledgeBaseResponse])
-# def list_knowledge_bases(db: Session = Depends(get_db)):
-#     """
-#     获取知识库列表
-#
-#     功能:
-#     - 查询并返回用户创建的所有知识库基本信息
-#
-#     返回:
-#     - 知识库列表，每个元素包含：
-#         - knowledge_base_id: 知识库唯一ID
-#         - name: 知识库名称
-#         - description: 描述
-#         - created_at: 创建时间
-#         - status: 状态("building"或"completed")
-#     """
-#     return get_all_knowledge_bases(db)
-#
-#
+@router.get("/",response_model=List[KnowledgeBaseListItem])
+async def list_knowledge_bases(
+        db: Session = Depends(get_db),
+        skip: int = 0,
+        limit: int = 100
+) -> List[KnowledgeBaseListItem]:
+    """
+    获取知识库列表API
+
+    参数:
+    - skip: 跳过的记录数（用于分页），默认为0
+    - limit: 每页返回的最大记录数，默认为100，最大1000
+
+    返回:
+    - List[KnowledgeBaseListItem]: 知识库基本信息列表，包含:
+      - knowledge_base_id: 知识库唯一标识
+      - name: 知识库名称
+      - description: 知识库描述（可选）
+      - created_at: 创建时间(ISO 8601格式)
+      - status: 知识库状态（building/completed）
+
+
+    错误码:
+    - 500: 服务器内部错误
+    """
+    try:
+        # 从数据库查询知识库列表（按创建时间倒序）
+        knowledge_bases = db.query(KnowledgeBase) \
+            .order_by(KnowledgeBase.created_at.desc()) \
+            .offset(skip) \
+            .limit(limit) \
+            .all()
+
+        # 转换为响应模型
+        return [
+            KnowledgeBaseListItem(
+                knowledge_base_id=kb.id,
+                name=kb.name,
+                description=kb.description,
+                created_at=kb.created_at,
+                status=kb.status
+            )
+            for kb in knowledge_bases
+        ]
+
+    except Exception as e:
+        logger.error(f"获取知识库列表失败: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error"
+        )
+
 # @router.get("/{knowledge_base_id}", response_model=KnowledgeBaseResponse)
 # def get_knowledge_base(
 #         knowledge_base_id: UUID,
