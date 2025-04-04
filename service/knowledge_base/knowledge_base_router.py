@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from rest_framework import status
 from sqlalchemy import text, exc
 
 from ..database import get_db
@@ -309,7 +308,7 @@ async def rebuild_knowledge_base(
         if not kb:
             db.rollback()
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=404,
                 detail=f"Knowledge base {knowledge_base_id} not found"
             )
 
@@ -353,7 +352,7 @@ async def rebuild_knowledge_base(
         except Exception as e:
             logger.error(f"Failed to start rebuild task: {str(e)}")
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status_code=500,
                 detail="Failed to start rebuild process"
             )
 
@@ -365,14 +364,14 @@ async def rebuild_knowledge_base(
     except ValueError as e:
         db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=400,
             detail=str(e)
         )
     except exc.SQLAlchemyError as e:
         db.rollback()
         logger.error(f"Database error during rebuild: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=500,
             detail="Database operation failed"
         )
     except HTTPException:
@@ -381,13 +380,13 @@ async def rebuild_knowledge_base(
         db.rollback()
         logger.error(f"Unexpected error during rebuild: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=500,
             detail="Internal server error"
         )
 
 @router.delete(
     "/{knowledge_base_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
+    status_code=204,
     summary="删除知识库",
     description="删除知识库元数据及关联数据表记录（不处理实际文件删除）",
     responses={
@@ -421,7 +420,7 @@ async def delete_knowledge_base(
         if not kb:
             db.rollback()
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=404,
                 detail=f"Knowledge base {knowledge_base_id} not found"
             )
 
@@ -443,13 +442,13 @@ async def delete_knowledge_base(
         db.rollback()
         logger.error(f"Database error deleting KB {knowledge_base_id}: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=500,
             detail="Database operation failed"
         )
     except Exception as e:
         db.rollback()
         logger.error(f"Unexpected error deleting KB {knowledge_base_id}: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=500,
             detail="Internal server error"
         )
