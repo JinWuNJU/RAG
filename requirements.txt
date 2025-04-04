@@ -16,5 +16,5 @@ python-jose[cryptography]==3.4.0
 alembic==1.13.1
 langchain-community~=0.3.20
 pydantic-settings~=2.8.1
-git+ssh://git@172.29.4.49:8888/2025seiii-ThunderForce/smolagents-fork.git # smolagents
 loguru==0.7.2
+pydantic-ai[mcp]==0.0.46

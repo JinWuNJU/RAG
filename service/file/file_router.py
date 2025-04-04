@@ -1,13 +1,14 @@
-from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from uuid import UUID
 import io
+from fastapi_jwt_auth2 import AuthJWT
 
 from model.file.file import FileUploadResponse, FileMetadata, FileTypeError, FileSizeError
 from service.database import get_db
-from service.file.file import upload_to_database, get_file_by_id, get_file_metadata, delete_file
+from service.file.file import upload_to_database, get_file_by_id, get_file_metadata, delete_file, get_user_files
 
 router = APIRouter(tags=["files"], prefix="/files")
 
@@ -17,7 +18,8 @@ async def upload_file(
     allowed_types: Optional[List[str]] = Form(None),
     max_size_mb: Optional[float] = Form(None),
     is_public: bool = Form(False),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    Authorize: AuthJWT = Depends()
 ):
     """
     通用文件上传接口
@@ -31,13 +33,17 @@ async def upload_file(
     返回:
         文件ID
     """
+    Authorize.jwt_required()
+    current_user = Authorize.get_jwt_subject()
+    
     try:
         file_id = await upload_to_database(
             file=file,
             db=db,
             allowed_types=allowed_types,
             max_size_mb=max_size_mb,
-            is_public=is_public
+            is_public=is_public,
+            user_name=current_user
         )
 
         return FileUploadResponse(file_id=file_id)
@@ -48,7 +54,11 @@ async def upload_file(
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/{file_id}/metadata", response_model=FileMetadata)
-async def get_file_info(file_id: UUID, db: Session = Depends(get_db)):
+async def get_file_info(
+    file_id: UUID, 
+    db: Session = Depends(get_db),
+    Authorize: AuthJWT = Depends()
+):
     """
     获取文件元数据
     
@@ -58,10 +68,18 @@ async def get_file_info(file_id: UUID, db: Session = Depends(get_db)):
     返回:
         文件元数据
     """
-    return await get_file_metadata(file_id, db)
+    Authorize.jwt_required()
+    current_user = Authorize.get_jwt_subject()
+    
+    metadata = await get_file_metadata(file_id, db, current_user)
+    return metadata
 
 @router.get("/{file_id}")
-async def download_file(file_id: UUID, db: Session = Depends(get_db)):
+async def download_file(
+    file_id: UUID, 
+    db: Session = Depends(get_db),
+    Authorize: AuthJWT = Depends()
+):
     """
     下载文件
     
@@ -71,7 +89,10 @@ async def download_file(file_id: UUID, db: Session = Depends(get_db)):
     返回:
         文件内容
     """
-    file = await get_file_by_id(file_id, db)
+    Authorize.jwt_required()
+    current_user = Authorize.get_jwt_subject()
+    
+    file = await get_file_by_id(file_id, db, current_user)
     
     return StreamingResponse(
         io.BytesIO(file.data),
@@ -80,7 +101,11 @@ async def download_file(file_id: UUID, db: Session = Depends(get_db)):
     )
 
 @router.delete("/{file_id}")
-async def remove_file(file_id: UUID, db: Session = Depends(get_db)):
+async def remove_file(
+    file_id: UUID, 
+    db: Session = Depends(get_db),
+    Authorize: AuthJWT = Depends()
+):
     """
     删除文件
     
@@ -90,7 +115,10 @@ async def remove_file(file_id: UUID, db: Session = Depends(get_db)):
     返回:
         删除成功状态
     """
-    success = await delete_file(file_id, db)
+    Authorize.jwt_required()
+    current_user = Authorize.get_jwt_subject()
+    
+    success = await delete_file(file_id, db, current_user)
     
     if success:
         return True
@@ -102,7 +130,8 @@ async def remove_file(file_id: UUID, db: Session = Depends(get_db)):
 async def upload_eval_data(
     file: UploadFile = File(...),
     max_size_mb: float = Form(10.0),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    Authorize: AuthJWT = Depends()
 ):
     """
     上传评估数据文件（JSON格式）
@@ -114,12 +143,16 @@ async def upload_eval_data(
     返回:
         文件ID
     """
+    Authorize.jwt_required()
+    current_user = Authorize.get_jwt_subject()
+    
     try:
         file_id = await upload_to_database(
             file=file,
             db=db,
             allowed_types=["application/json"],
-            max_size_mb=max_size_mb
+            max_size_mb=max_size_mb,
+            user_name=current_user
         )
 
         return FileUploadResponse(file_id=file_id)
@@ -133,7 +166,8 @@ async def upload_eval_data(
 async def upload_knowledge(
     file: UploadFile = File(...),
     max_size_mb: float = Form(50.0),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    Authorize: AuthJWT = Depends()
 ):
     """
     上传知识库文件（纯文本格式）
@@ -145,12 +179,16 @@ async def upload_knowledge(
     返回:
         文件ID
     """
+    Authorize.jwt_required()
+    current_user = Authorize.get_jwt_subject()
+    
     try:
         file_id = await upload_to_database(
             file=file,
             db=db,
             allowed_types=["text/plain"],
-            max_size_mb=max_size_mb
+            max_size_mb=max_size_mb,
+            user_name=current_user
         )
         
         return FileUploadResponse(file_id=file_id)
@@ -158,4 +196,24 @@ async def upload_knowledge(
     except FileTypeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except FileSizeError as e:
-        raise HTTPException(status_code=400, detail=str(e)) 
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/my-files", response_model=List[FileMetadata])
+async def list_my_files(
+    include_public: bool = Query(False, description="包含所有公开文件"),
+    db: Session = Depends(get_db),
+    Authorize: AuthJWT = Depends()
+):
+    """
+    获取当前用户的所有文件
+    
+    参数:
+        include_public: 是否包含公开文件，默认为False
+        
+    返回:
+        文件元数据列表
+    """
+    Authorize.jwt_required()
+    current_user = Authorize.get_jwt_subject()
+    
+    return await get_user_files(db, current_user, include_public) 
