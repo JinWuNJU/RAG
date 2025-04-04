@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from sqlalchemy import text
 
 from ..database import get_db
 from .service import *
@@ -181,34 +182,91 @@ async def get_knowledge_base_detail(
             detail="Internal server error"
         )
 
-# @router.post("/{knowledge_base_id}/search", response_model=List[KnowledgeBaseSearchResult])
-# def search_knowledge_base(
-#         knowledge_base_id: UUID,
-#         query: str,
-#         db: Session = Depends(get_db)
-# ):
-#     """
-#     搜索知识库内容
-#
-#     参数:
-#     - knowledge_base_id: 要搜索的知识库ID
-#     - query: 搜索关键词
-#
-#     功能:
-#     - 使用PGroonga全文检索功能搜索知识库内容
-#     - 仅搜索knowledge_base_chunks表中的content字段
-#
-#     返回:
-#     - 匹配的文档片段列表，每个元素包含：
-#         - content: 文档片段内容
-#         - file_name: 来源文件名
-#         - file_id: 来源文件ID
-#         - chunk_index: 分块序号
-#     """
-#     return search_in_knowledge_base(db, knowledge_base_id, query)
-#
-#
-# # 以下是参考文档中提到的其他API，可以按需添加：
+
+@router.post("/{knowledge_base_id}/search",response_model=List[SearchResult])
+async def search_knowledge_base(
+        knowledge_base_id: UUID,
+        request: SearchRequest,
+        db: Session = Depends(get_db)
+) -> List[SearchResult]:
+    """
+    搜索知识库内容API
+
+    参数:
+    - knowledge_base_id: 知识库唯一标识
+    - request: 搜索请求体，包含:
+      - query: 搜索关键词
+      - limit: 返回结果数量限制（默认10，最大100）
+
+    返回:
+    - List[SearchResult]: 匹配的文档片段列表
+
+
+
+    错误码:
+    - 400: 搜索关键词为空
+    - 404: 知识库不存在或无匹配结果
+    - 500: 服务器内部错误
+    """
+    # 参数验证
+    if not request.query.strip():
+        raise HTTPException(status_code=400, detail="搜索关键词不能为空")
+
+    # 限制最大返回数量
+    limit = min(request.limit, 100)
+
+    try:
+        # 执行PGroonga全文检索
+        results = db.query(
+            KnowledgeBaseChunk.content,
+            KnowledgeBaseChunk.file_name,
+            KnowledgeBaseChunk.file_id,
+            KnowledgeBaseChunk.chunk_index
+        ).filter(
+            KnowledgeBaseChunk.knowledge_base_id == knowledge_base_id,
+            text(f"knowledge_base_chunks.content &@~ '{request.query}'")
+        ).order_by(
+            text("pgroonga_score(knowledge_base_chunks.tableoid, knowledge_base_chunks.ctid) DESC")
+        ).limit(limit).all()
+
+        if not results:
+            raise HTTPException(
+                status_code=404,
+                detail=f"知识库 {knowledge_base_id} 中未找到匹配内容"
+            )
+
+        return [
+            SearchResult(
+                content=result.content,
+                file_name=result.file_name,
+                file_id=result.file_id,
+                chunk_index=result.chunk_index
+            )
+            for result in results
+        ]
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"搜索失败: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="服务器内部错误，请稍后再试"
+        )
+
+# 索引健康检查端点（可选）
+@router.get("/search/status")
+async def check_search_status(db: Session = Depends(get_db)):
+    """检查搜索引擎状态"""
+    try:
+        # 检查PGroonga索引
+        db.execute(text("SELECT pgroonga_command('status')")).fetchone()
+        # 检查向量索引
+        db.execute(text("SELECT ivfflat_probes('ivfflat_embedding_index')"))
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(503, detail=f"搜索引擎异常: {str(e)}")
+
 #
 # @router.put("/{knowledge_base_id}/rebuild", response_model=KnowledgeBaseResponse)
 # def rebuild_knowledge_base(

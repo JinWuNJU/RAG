@@ -53,3 +53,20 @@ class KnowledgeBaseSearchResult(BaseModel):
     file_name: str
     file_id: UUID
     chunk_index: int
+
+class SearchRequest(BaseModel):
+    """搜索请求体"""
+    query: str
+    limit: int = 10  # 默认返回10条结果
+
+class SearchResult(BaseModel):
+    """搜索结果响应模型"""
+    content: str
+    file_name: str    # 直接从knowledge_base_chunks表获取
+    file_id: UUID
+    chunk_index: int
+
+    class Config:
+        json_encoders = {
+            UUID: lambda v: str(v)  # UUID转为字符串
+        }

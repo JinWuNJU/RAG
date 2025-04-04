@@ -34,11 +34,10 @@ class TextFileProcessor:
 
         # 更新知识库状态
         try:
+            kb.status = "completed"
             if success_count == len(file_ids):  # 所有文件处理成功
-                kb.status = "completed"
                 logger.success(f"所有文件处理完成，知识库 {kb_id} 状态已更新为 completed")
             else:
-                kb.status = "partial_completed"  # 可选：添加部分完成状态
                 logger.warning(f"部分文件处理完成，知识库 {kb_id} 状态为 partial_completed")
 
             self.db.commit()
@@ -82,35 +81,67 @@ class TextFileProcessor:
         return True
 
     def _chunk_text(self, text: str, chunk_size: int, overlap_size: int) -> List[str]:
-        """优化后的中文文本分块"""
-        # 1. 清洗文本
-        cleaned = re.sub(r'\s+', ' ', text).strip()
+        """文本分块"""
+        # 预处理：标准化空白字符但保留段落分隔
+        text = re.sub(r'([^\n])\n([^\n])', r'\1 \2', text)  # 单换行变空格
+        text = re.sub(r'[ \t]+', ' ', text)  # 合并连续空白
 
-        # 2. 中文分词
-        words = jieba.lcut(cleaned)
-
-        # 3. 按词分块
         chunks = []
-        start = 0
-        total_words = len(words)
+        pos = 0
+        len_text = len(text)
 
-        while start < total_words:
-            end = min(start + chunk_size, total_words)
+        while pos < len_text:
+            # 计算本块理论终点
+            end = min(pos + chunk_size, len_text)
 
-            # 确保不截断句子（简单实现：遇到标点符号才分块）
-            while (end < total_words and
-                   not self._is_sentence_boundary(words[end - 1])):
-                end += 1
+            # 查找最佳分割点（三级回退策略）
+            split_pos = None
+            for candidate in [
+                text.rfind('\n\n', pos, end),  # 1. 优先段落分隔
+                text.rfind('\n', pos, end),  # 2. 次选行尾
+                text.rfind('。', pos, end),  # 3. 句子结束
+                text.rfind('！', pos, end),
+                text.rfind('？', pos, end),
+                text.rfind('.', pos, end),
+                text.rfind('!', pos, end),
+                text.rfind('?', pos, end),
+                text.rfind('；', pos, end),  # 4. 分号
+                text.rfind(';', pos, end),
+                text.rfind('，', pos, end),  # 5. 逗号（最后选择）
+                text.rfind(',', pos, end)
+            ]:
+                if candidate > pos and (split_pos is None or candidate > split_pos):
+                    split_pos = candidate + 1  # 包含边界字符
+                    break
 
-            chunk = ''.join(words[start:end])
-            chunks.append(chunk)
-            start = max(end - overlap_size, start + 1)
+            # 如果找不到合适边界且剩余文本过长，强制分割
+            if split_pos is None and (end - pos) > chunk_size:
+                split_pos = end
+
+            # 确定最终分割点
+            actual_split = split_pos if split_pos is not None else end
+
+            # 获取当前块内容
+            chunk = text[pos:actual_split].strip()
+            if chunk:
+                # 检查是否与前一块尾部重复（动态重叠控制）
+                if not chunks or not self._is_redundant(chunk, chunks[-1], overlap_size):
+                    chunks.append(chunk)
+
+            # 更新位置（动态重叠调整）
+            pos = max(
+                actual_split - overlap_size,  # 理论重叠位置
+                pos + chunk_size // 2  # 保证至少前进50%块长度
+            ) if split_pos is not None else actual_split
 
         return chunks
 
-    def _is_sentence_boundary(self, word: str) -> bool:
-        """简单判断是否句子边界"""
-        return word in {'。', '！', '？', '.', '!', '?'}
+    def _is_redundant(self,new_chunk: str, last_chunk: str, overlap: int) -> bool:
+        """检查新块是否与上一块尾部过度重复"""
+        if overlap <= 0:
+            return False
+        overlap_part = last_chunk[-overlap:]
+        return new_chunk.startswith(overlap_part) and len(new_chunk) <= overlap * 1.5
 
     def _save_chunks(self, kb_id: UUID, file_id: UUID, filename: str, chunks: List[str]):
         """批量保存分块到数据库"""
