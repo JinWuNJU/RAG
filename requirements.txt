@@ -17,5 +17,4 @@ alembic==1.13.1
 langchain-community~=0.3.20
 pydantic-settings~=2.8.1
 git+ssh://git@172.29.4.49:8888/2025seiii-ThunderForce/smolagents-fork.git # smolagents
-jieba==0.42.1               # 中文分词核心库
 loguru==0.7.2

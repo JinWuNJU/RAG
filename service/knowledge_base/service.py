@@ -2,15 +2,12 @@ from typing import List
 
 from loguru import logger
 from sqlalchemy.orm import Session
-import jieba
 import re
 
 from model.file.file import FileDB
 from model.knowledge_base.knowledge_base_model import *
 
-# 初始化jieba分词器
-jieba.initialize()
-jieba.setLogLevel(jieba.logging.INFO)
+
 
 
 class TextFileProcessor:

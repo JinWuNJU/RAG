@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from sqlalchemy import text
+from rest_framework import status
+from sqlalchemy import text, exc
 
 from ..database import get_db
 from .service import *
@@ -267,53 +268,188 @@ async def check_search_status(db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(503, detail=f"搜索引擎异常: {str(e)}")
 
-#
-# @router.put("/{knowledge_base_id}/rebuild", response_model=KnowledgeBaseResponse)
-# def rebuild_knowledge_base(
-#         knowledge_base_id: UUID,
-#         rebuild_data: KnowledgeBaseRebuild,
-#         background_tasks: BackgroundTasks,
-#         db: Session = Depends(get_db)
-# ):
-#     """
-#     重建知识库
-#
-#     参数:
-#     - knowledge_base_id: 要重建的知识库ID
-#     - rebuild_data: 包含新参数的请求体：
-#         - chunk_size: 新的分块大小
-#         - overlap_size: 新的重叠大小
-#         - hybrid_ratio: 新的混合检索比例
-#
-#     功能:
-#     1. 删除该知识库原有的所有分块数据
-#     2. 更新知识库元数据中的参数
-#     3. 状态重置为"building"
-#     4. 异步重新处理文件分块
-#
-#     返回:
-#     - 更新后的知识库基本信息
-#     """
-#     pass
-#
-#
-# @router.delete("/{knowledge_base_id}")
-# def delete_knowledge_base(
-#         knowledge_base_id: UUID,
-#         db: Session = Depends(get_db)
-# ):
-#     """
-#     删除知识库
-#
-#     参数:
-#     - knowledge_base_id: 要删除的知识库ID
-#
-#     功能:
-#     1. 删除知识库元数据记录
-#     2. 删除关联的所有分块数据
-#     3. 不处理实际文件删除
-#
-#     返回:
-#     - 204 No Content
-#     """
-#     pass
+
+@router.put("/{knowledge_base_id}/rebuild", response_model=KnowledgeBaseCreateResponse)
+async def rebuild_knowledge_base(
+        knowledge_base_id: UUID,
+        request: KnowledgeBaseCreate,
+        background_tasks: BackgroundTasks,
+        db: Session = Depends(get_db)
+):
+    """
+    重建知识库（异步处理文件分块）
+
+    参数:
+    - request: 包含知识库创建所需数据的请求体，包括：
+        - name: 知识库名称
+        - description: 知识库描述
+        - file_ids: 关联的文件ID列表
+        - chunk_size: 文档分块大小
+        - overlap_size: 分块重叠大小
+        - hybrid_ratio: 混合检索比例（预留参数）
+
+    功能:
+    1. 更新知识库元数据记录，更改状态为"building"
+    2. 删除原有的分块记录
+    3. 在后台异步处理文件分块：
+       - 使用中文分词库
+       - 根据chunk_size和overlap_size分割文件内容
+       - 将分块存入knowledge_base_chunks表
+    4. 向量列(embedding)暂不填充
+
+    返回:
+    - 创建的知识库基本信息，包括knowledge_base_id和状态
+    """
+    try:
+        # 开启事务
+        db.begin()
+
+        # 检查知识库是否存在
+        kb = db.query(KnowledgeBase).filter_by(id=knowledge_base_id).first()
+        if not kb:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Knowledge base {knowledge_base_id} not found"
+            )
+
+        # # 获取关联文件列表（用于后续重建）
+        # files = db.query(FileDB) \
+        #     .filter_by(knowledge_base_id=knowledge_base_id) \
+        #     .all()
+        # if not files:
+        #     db.rollback()
+        #     raise HTTPException(
+        #         status_code=status.HTTP_400_BAD_REQUEST,
+        #         detail="No files associated with this knowledge base"
+        #     )
+
+        # 删除旧的分块数据（批量删除提高性能）
+        deleted_count = db.query(KnowledgeBaseChunk) \
+            .filter_by(knowledge_base_id=knowledge_base_id) \
+            .delete(synchronize_session=False)
+        logger.info(f"Deleted {deleted_count} old chunks for KB {knowledge_base_id}")
+
+        # 更新知识库参数
+        kb.chunk_size = request.chunk_size
+        kb.overlap_size = request.overlap_size
+        kb.hybrid_ratio = request.hybrid_ratio
+        kb.status = "building"
+
+        db.commit()
+
+        # 启动异步重建任务
+        try:
+
+            # 提交后台处理任务
+            processor = TextFileProcessor(db)
+
+            background_tasks.add_task(
+                processor.process_files,
+                kb_id=knowledge_base_id,
+                file_ids=request.file_ids
+            )
+            logger.info(f"Started rebuild task for KB {knowledge_base_id}")
+        except Exception as e:
+            logger.error(f"Failed to start rebuild task: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to start rebuild process"
+            )
+
+        return KnowledgeBaseCreateResponse(
+            knowledge_base_id=knowledge_base_id,
+            status=kb.status
+        )
+
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except exc.SQLAlchemyError as e:
+        db.rollback()
+        logger.error(f"Database error during rebuild: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database operation failed"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Unexpected error during rebuild: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+@router.delete(
+    "/{knowledge_base_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="删除知识库",
+    description="删除知识库元数据及关联数据表记录（不处理实际文件删除）",
+    responses={
+        204: {"description": "成功删除"},
+        404: {"description": "知识库不存在"},
+        500: {"description": "数据库操作失败"}
+    }
+)
+async def delete_knowledge_base(
+        knowledge_base_id: UUID,
+        db: Session = Depends(get_db)
+):
+    """
+    删除知识库API
+
+    安全措施：
+    1. 使用数据库事务保证数据一致性
+    2. 级联删除关联的分块记录
+    3. 严格验证知识库存在性
+
+    注意：
+    - 不会删除文件系统中的原始文件
+    - 删除操作不可逆
+    """
+    try:
+        # 开启事务
+        db.begin()
+
+        # 检查知识库是否存在
+        kb = db.query(KnowledgeBase).filter_by(id=knowledge_base_id).first()
+        if not kb:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Knowledge base {knowledge_base_id} not found"
+            )
+
+        # 级联删除分块数据（使用批量删除提高性能）
+        db.query(KnowledgeBaseChunk) \
+            .filter_by(knowledge_base_id=knowledge_base_id) \
+            .delete(synchronize_session=False)
+
+        # 删除主记录
+        db.delete(kb)
+        db.commit()
+
+        # 记录审计日志（示例）
+        logger.info(f"Deleted knowledge base: {knowledge_base_id}")
+
+        return {"detail": "Knowledge base deleted successfully"}
+
+    except exc.SQLAlchemyError as e:
+        db.rollback()
+        logger.error(f"Database error deleting KB {knowledge_base_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database operation failed"
+        )
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Unexpected error deleting KB {knowledge_base_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
