@@ -12,6 +12,7 @@ class KnowledgeBaseCreate(BaseModel):
     chunk_size: int = 1024
     overlap_size: int = 256
     hybrid_ratio: float = 0.5
+    is_public: bool = False
 
 class KnowledgeBaseCreateResponse(BaseModel):
     """知识库创建响应模型"""

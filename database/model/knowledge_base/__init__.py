@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import CheckConstraint, Column, Index, String, Integer, Float, DateTime, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, Boolean, Index, String, Integer, Float, DateTime, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from pgvector.sqlalchemy import Vector
 from sqlalchemy.sql import func
@@ -20,7 +20,9 @@ class KnowledgeBase(Base):
     chunk_size: Mapped[int] = mapped_column(Integer, nullable=False)
     overlap_size: Mapped[int] = mapped_column(Integer, nullable=False)
     hybrid_ratio: Mapped[float] = mapped_column(Float, server_default='0.5')
-    
+    is_public: Mapped[bool] = mapped_column(Boolean, server_default='false', nullable=False)
+    uploader_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey('users.id'), nullable=False)
+
     # Table constraints and indexes
     __table_args__ = (
         CheckConstraint("status IN ('building', 'completed', 'failed')", name='check_valid_status'),

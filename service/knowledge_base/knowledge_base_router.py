@@ -1,11 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from jose import JWTError
 from sqlalchemy import text, exc
 
 from database import get_db
 from .service import *
 from database.model.knowledge_base import *
 from rest_model.knowledge_base import *
+from fastapi_jwt_auth2 import AuthJWT
 
+from ..user import auth
 
 # 创建知识库相关的API路由，设置标签和前缀
 router = APIRouter(tags=["Knowledge Bases"], prefix="/knowledge_bases")
@@ -18,7 +21,8 @@ def test_endpoint():
 async def create_knowledge_base(
         data: KnowledgeBaseCreate,
         background_tasks: BackgroundTasks,
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        Authorize: AuthJWT = Depends()
 ):
     """
     创建知识库（异步处理文件分块）
@@ -43,6 +47,7 @@ async def create_knowledge_base(
     返回:
     - 创建的知识库基本信息，包括knowledge_base_id和状态
     """
+    user_id = auth.decode_jwt_to_uid(Authorize)
     # 创建知识库元数据
     try:
         # 创建知识库元数据
@@ -51,6 +56,8 @@ async def create_knowledge_base(
             chunk_size=data.chunk_size,
             overlap_size=data.overlap_size,
             description=data.description,
+            uploader_id=user_id,
+            is_public=data.is_public,
         )
         db.add(kb)
         db.commit()
@@ -77,6 +84,7 @@ async def create_knowledge_base(
 @router.get("/",response_model=List[KnowledgeBaseListItem])
 async def list_knowledge_bases(
         db: Session = Depends(get_db),
+        Authorize: AuthJWT = Depends(),
         skip: int = 0,
         limit: int = 100
 ) -> List[KnowledgeBaseListItem]:
@@ -99,10 +107,16 @@ async def list_knowledge_bases(
     错误码:
     - 500: 服务器内部错误
     """
+    user_id = auth.decode_jwt_to_uid(Authorize)
     try:
-        # 从数据库查询知识库列表（按创建时间倒序）
-        knowledge_bases = db.query(KnowledgeBase) \
-            .order_by(KnowledgeBase.created_at.desc()) \
+        # 构建查询条件
+        query = db.query(KnowledgeBase).filter(
+            (KnowledgeBase.is_public == True) |  # 公开的知识库
+            (KnowledgeBase.uploader_id == user_id)  # 或当前用户上传的
+        )
+
+        # 执行查询（按创建时间倒序）
+        knowledge_bases = query.order_by(KnowledgeBase.created_at.desc()) \
             .offset(skip) \
             .limit(limit) \
             .all()
@@ -129,7 +143,8 @@ async def list_knowledge_bases(
 @router.get("/{knowledge_base_id}",response_model=KnowledgeBaseDetailResponse)
 async def get_knowledge_base_detail(
     knowledge_base_id: UUID,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    Authorize: AuthJWT = Depends()
 ) -> KnowledgeBaseDetailResponse:
     """
     获取知识库详情API
@@ -153,13 +168,18 @@ async def get_knowledge_base_detail(
     - 404: 知识库不存在
     - 500: 服务器内部错误
     """
+    user_id = auth.decode_jwt_to_uid(Authorize)
     try:
-        # 查询知识库详情
-        kb = db.query(KnowledgeBase).filter_by(id=knowledge_base_id).first()
+        # 查询知识库（同时检查权限）
+        kb = db.query(KnowledgeBase).filter(
+            (KnowledgeBase.id == knowledge_base_id) &
+            ((KnowledgeBase.is_public == True) | (KnowledgeBase.uploader_id == user_id))
+        ).first()
+
         if not kb:
             raise HTTPException(
                 status_code=404,
-                detail=f"Knowledge base {knowledge_base_id} not found"
+                detail=f"知识库{knowledge_base_id}无法访问或不存在"
             )
 
         return KnowledgeBaseDetailResponse(
@@ -187,7 +207,8 @@ async def get_knowledge_base_detail(
 async def search_knowledge_base(
         knowledge_base_id: UUID,
         request: SearchRequest,
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        Authorize: AuthJWT = Depends()
 ) -> List[SearchResult]:
     """
     搜索知识库内容API
@@ -208,6 +229,18 @@ async def search_knowledge_base(
     - 404: 知识库不存在或无匹配结果
     - 500: 服务器内部错误
     """
+    user_id = auth.decode_jwt_to_uid(Authorize)
+    kb = db.query(KnowledgeBase).filter(
+        (KnowledgeBase.id == knowledge_base_id) &
+        ((KnowledgeBase.is_public == True) | (KnowledgeBase.uploader_id == user_id))
+    ).first()
+
+    if not kb:
+        raise HTTPException(
+            status_code=404,
+            detail=f"知识库{knowledge_base_id}无法访问或不存在"
+        )
+
     # 参数验证
     if not request.query.strip():
         raise HTTPException(status_code=400, detail="搜索关键词不能为空")
@@ -273,7 +306,8 @@ async def rebuild_knowledge_base(
         knowledge_base_id: UUID,
         request: KnowledgeBaseCreate,
         background_tasks: BackgroundTasks,
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        Authorize: AuthJWT = Depends()
 ):
     """
     重建知识库（异步处理文件分块）
@@ -299,29 +333,18 @@ async def rebuild_knowledge_base(
     返回:
     - 创建的知识库基本信息，包括knowledge_base_id和状态
     """
+    user_id = auth.decode_jwt_to_uid(Authorize)
+    kb = db.query(KnowledgeBase).filter(
+        (KnowledgeBase.id == knowledge_base_id) &
+         (KnowledgeBase.uploader_id == user_id)
+    ).first()
+
+    if not kb:
+        raise HTTPException(
+            status_code=404,
+            detail=f"知识库{knowledge_base_id}不存在或没有权限修改"
+        )
     try:
-        # 开启事务
-        db.begin()
-
-        # 检查知识库是否存在
-        kb = db.query(KnowledgeBase).filter_by(id=knowledge_base_id).first()
-        if not kb:
-            db.rollback()
-            raise HTTPException(
-                status_code=404,
-                detail=f"Knowledge base {knowledge_base_id} not found"
-            )
-
-        # # 获取关联文件列表（用于后续重建）
-        # files = db.query(FileDB) \
-        #     .filter_by(knowledge_base_id=knowledge_base_id) \
-        #     .all()
-        # if not files:
-        #     db.rollback()
-        #     raise HTTPException(
-        #         status_code=status.HTTP_400_BAD_REQUEST,
-        #         detail="No files associated with this knowledge base"
-        #     )
 
         # 删除旧的分块数据（批量删除提高性能）
         deleted_count = db.query(KnowledgeBaseChunk) \
@@ -334,8 +357,10 @@ async def rebuild_knowledge_base(
         kb.overlap_size = request.overlap_size
         kb.hybrid_ratio = request.hybrid_ratio
         kb.status = "building"
+        kb.is_public = request.is_public
 
         db.commit()
+        db.refresh(kb)
 
         # 启动异步重建任务
         try:
@@ -361,28 +386,11 @@ async def rebuild_knowledge_base(
             status=kb.status
         )
 
-    except ValueError as e:
-        db.rollback()
-        raise HTTPException(
-            status_code=400,
-            detail=str(e)
-        )
-    except exc.SQLAlchemyError as e:
-        db.rollback()
-        logger.error(f"Database error during rebuild: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail="Database operation failed"
-        )
-    except HTTPException:
-        raise
+
     except Exception as e:
         db.rollback()
-        logger.error(f"Unexpected error during rebuild: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error"
-        )
+        raise HTTPException(500, detail=str(e))
+
 
 @router.delete(
     "/{knowledge_base_id}",
@@ -391,41 +399,43 @@ async def rebuild_knowledge_base(
     description="删除知识库元数据及关联数据表记录（不处理实际文件删除）",
     responses={
         204: {"description": "成功删除"},
+        403: {"description": "没有操作权限"},
         404: {"description": "知识库不存在"},
         500: {"description": "数据库操作失败"}
     }
 )
 async def delete_knowledge_base(
         knowledge_base_id: UUID,
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        Authorize: AuthJWT = Depends()
 ):
     """
     删除知识库API
 
-    安全措施：
-    1. 使用数据库事务保证数据一致性
-    2. 级联删除关联的分块记录
-    3. 严格验证知识库存在性
+    安全规则：
+    - 只有知识库上传者可以删除
+    - 自动级联删除关联分块数据
+    - 数据库事务保证原子性
 
-    注意：
-    - 不会删除文件系统中的原始文件
-    - 删除操作不可逆
+    注意：不会删除文件系统中的原始文件
     """
-    try:
-        # 开启事务
-        db.begin()
+    user_id = auth.decode_jwt_to_uid(Authorize)
 
-        # 检查知识库是否存在
-        kb = db.query(KnowledgeBase).filter_by(id=knowledge_base_id).first()
+    try:
+        # 查询知识库并验证权限（单次查询优化）
+        kb = db.query(KnowledgeBase).filter(
+            (KnowledgeBase.id == knowledge_base_id) &
+            (KnowledgeBase.uploader_id == user_id)
+        ).with_for_update().first()  # 加锁防止并发修改
+
         if not kb:
-            db.rollback()
             raise HTTPException(
                 status_code=404,
-                detail=f"Knowledge base {knowledge_base_id} not found"
+                detail="知识库不存在或没有删除权限"
             )
 
-        # 级联删除分块数据（使用批量删除提高性能）
-        db.query(KnowledgeBaseChunk) \
+        # 批量删除关联分块（性能优化）
+        chunk_count = db.query(KnowledgeBaseChunk) \
             .filter_by(knowledge_base_id=knowledge_base_id) \
             .delete(synchronize_session=False)
 
@@ -433,22 +443,25 @@ async def delete_knowledge_base(
         db.delete(kb)
         db.commit()
 
-        # 记录审计日志（示例）
-        logger.info(f"Deleted knowledge base: {knowledge_base_id}")
+        logger.info(
+            f"User {user_id} deleted KB {knowledge_base_id} "
+            f"(removed {chunk_count} chunks)"
+        )
 
-        return {"detail": "Knowledge base deleted successfully"}
+        # 204 No Content 响应
+        return {"description": "成功删除"}
 
+    except HTTPException:
+        raise  # 直接抛出已处理的HTTP异常
     except exc.SQLAlchemyError as e:
-        db.rollback()
         logger.error(f"Database error deleting KB {knowledge_base_id}: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail="Database operation failed"
+            detail="数据库操作失败"
         )
     except Exception as e:
-        db.rollback()
         logger.error(f"Unexpected error deleting KB {knowledge_base_id}: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail="Internal server error"
+            detail="服务器内部错误"
         )
