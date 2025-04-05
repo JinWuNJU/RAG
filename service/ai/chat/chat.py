@@ -7,9 +7,9 @@ from uuid import UUID
 from fastapi import APIRouter
 from sse_starlette import EventSourceResponse
 
-from model.chat.completions import MessagePayload
-from model.chat.history import ChatDetail, ChatHistory, ChatMessage
-from model.chat.sse import ChatBeginEvent, ChatEvent, DocReturnEvent, Document, RetrieveParams, SseEventPackage, ToolCallEvent, ToolEvent
+from rest_model.chat.completions import MessagePayload
+from rest_model.chat.history import ChatDetail, ChatHistory, ChatMessage
+from rest_model.chat.sse import ChatBeginEvent, ChatEvent, DocReturnEvent, Document, RetrieveParams, SseEventPackage, ToolCallEvent, ToolEvent
 
 
 

@@ -1,6 +1,9 @@
 services:
   pg:
     image: pg_roonga_vector:1.0
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: vectorsearch
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?error}

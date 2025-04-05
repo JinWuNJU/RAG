@@ -4,11 +4,8 @@ from loguru import logger
 from sqlalchemy.orm import Session
 import re
 
-from model.file.file import FileDB
-from model.knowledge_base.knowledge_base_model import *
-
-
-
+from database.model.file import FileDB
+from database.model.knowledge_base import *
 
 class TextFileProcessor:
     def __init__(self, db: Session):

@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy import text, exc
 
-from ..database import get_db
+from database import get_db
 from .service import *
-from model.knowledge_base.knowledge_base_model import *
-from model.knowledge_base.schemas import *
+from database.model.knowledge_base import *
+from rest_model.knowledge_base import *
 
 
 # 创建知识库相关的API路由，设置标签和前缀

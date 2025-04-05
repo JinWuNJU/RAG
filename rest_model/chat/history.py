@@ -2,7 +2,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
-from model.chat.sse import ToolEvent
+from rest_model.chat.sse import ToolEvent
     
 class ChatMessage(BaseModel):
     """聊天消息模型"""

@@ -7,8 +7,11 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import os
 
-from . import models,schemas,auth
-from service.database import get_db
+from database.model.user import *
+
+from . import auth
+from rest_model.user import *
+from database import get_db
 
 router = APIRouter(tags=["user"], prefix="/user")
 
@@ -28,14 +31,14 @@ def authjwt_exception_handler(request: Request, exc: AuthJWTException):
     )
 
 # 注册接口
-@router.post("/register", response_model=schemas.TokenResponse)
+@router.post("/register", response_model=TokenResponse)
 async def register(
-    user: schemas.UserCreate,
+    user: UserCreate,
     Authorize: AuthJWT = Depends(),
     db: Session = Depends(get_db)
 ):
     # 检查用户名是否已存在
-    db_user = db.query(models.User).filter(models.User.username == user.username).first()
+    db_user = db.query(User).filter(User.username == user.username).first()
     if db_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -44,7 +47,7 @@ async def register(
 
     # 创建用户
     hashed_password = auth.get_password_hash(user.password)
-    db_user = models.User(
+    db_user = User(
         username=user.username,
         password=hashed_password
     )
@@ -53,21 +56,18 @@ async def register(
     db.refresh(db_user)
 
     # 生成 JWT
-    access_token = Authorize.create_access_token(
-        subject=user.username,
-        expires_time=timedelta(days=7)
-    )
+    access_token = auth.gen_user_jwt(Authorize, db_user)
     return {"access_token": access_token}
 
 # 登录接口
-@router.post("/login", response_model=schemas.TokenResponse)
+@router.post("/login", response_model=TokenResponse)
 async def login(
-    user: schemas.UserLogin,
+    user: UserLogin,
     Authorize: AuthJWT = Depends(),
     db: Session = Depends(get_db)
 ):
     # 查询用户
-    db_user = db.query(models.User).filter(models.User.username == user.username).first()
+    db_user = db.query(User).filter(User.username == user.username).first()
     if not db_user or not auth.verify_password(user.password, db_user.password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -76,20 +76,16 @@ async def login(
         )
 
     # 生成 JWT
-    access_token = Authorize.create_access_token(
-        subject=user.username,
-        expires_time=timedelta(days=7)
-    )
+    access_token = auth.gen_user_jwt(Authorize, db_user)
     return {"access_token": access_token}
 
 # JWT 测试接口
 @router.get("/test")
 def test_jwt(Authorize: AuthJWT = Depends()):
     # 验证JWT令牌
-    Authorize.jwt_required()
-    current_user = Authorize.get_jwt_subject()
+    user_id = auth.decode_jwt_to_uid(Authorize)
     return {
         "status": "JWT验证成功",
-        "current_user": current_user,
+        "current_user": str(user_id),
         "test_passed": True
     }

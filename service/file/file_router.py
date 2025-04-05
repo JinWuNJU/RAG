@@ -6,9 +6,10 @@ from uuid import UUID
 import io
 from fastapi_jwt_auth2 import AuthJWT
 
-from model.file.file import FileUploadResponse, FileMetadata, FileTypeError, FileSizeError
-from service.database import get_db
+from rest_model.file import FileUploadResponse, FileMetadata, FileTypeError, FileSizeError
+from database import get_db
 from service.file.file import upload_to_database, get_file_by_id, get_file_metadata, delete_file, get_user_files
+from service.user import auth
 
 router = APIRouter(tags=["files"], prefix="/files")
 
@@ -33,9 +34,6 @@ async def upload_file(
     返回:
         文件ID
     """
-    Authorize.jwt_required()
-    current_user = Authorize.get_jwt_subject()
-    
     try:
         file_id = await upload_to_database(
             file=file,
@@ -43,7 +41,7 @@ async def upload_file(
             allowed_types=allowed_types,
             max_size_mb=max_size_mb,
             is_public=is_public,
-            user_name=current_user
+            user_id=auth.decode_jwt_to_uid(Authorize)
         )
 
         return FileUploadResponse(file_id=file_id)
@@ -68,10 +66,7 @@ async def get_file_info(
     返回:
         文件元数据
     """
-    Authorize.jwt_required()
-    current_user = Authorize.get_jwt_subject()
-    
-    metadata = await get_file_metadata(file_id, db, current_user)
+    metadata = await get_file_metadata(file_id, db, auth.decode_jwt_to_uid(Authorize))
     return metadata
 
 @router.get("/{file_id}")
@@ -89,10 +84,8 @@ async def download_file(
     返回:
         文件内容
     """
-    Authorize.jwt_required()
-    current_user = Authorize.get_jwt_subject()
     
-    file = await get_file_by_id(file_id, db, current_user)
+    file = await get_file_by_id(file_id, db, auth.decode_jwt_to_uid(Authorize))
     
     return StreamingResponse(
         io.BytesIO(file.data),
@@ -115,10 +108,8 @@ async def remove_file(
     返回:
         删除成功状态
     """
-    Authorize.jwt_required()
-    current_user = Authorize.get_jwt_subject()
     
-    success = await delete_file(file_id, db, current_user)
+    success = await delete_file(file_id, db, auth.decode_jwt_to_uid(Authorize))
     
     if success:
         return True
@@ -143,8 +134,6 @@ async def upload_eval_data(
     返回:
         文件ID
     """
-    Authorize.jwt_required()
-    current_user = Authorize.get_jwt_subject()
     
     try:
         file_id = await upload_to_database(
@@ -152,7 +141,7 @@ async def upload_eval_data(
             db=db,
             allowed_types=["application/json"],
             max_size_mb=max_size_mb,
-            user_name=current_user
+            user_id=auth.decode_jwt_to_uid(Authorize)
         )
 
         return FileUploadResponse(file_id=file_id)
@@ -179,8 +168,6 @@ async def upload_knowledge(
     返回:
         文件ID
     """
-    Authorize.jwt_required()
-    current_user = Authorize.get_jwt_subject()
     
     try:
         file_id = await upload_to_database(
@@ -188,7 +175,7 @@ async def upload_knowledge(
             db=db,
             allowed_types=["text/plain"],
             max_size_mb=max_size_mb,
-            user_name=current_user
+            user_id=auth.decode_jwt_to_uid(Authorize)
         )
         
         return FileUploadResponse(file_id=file_id)
@@ -213,7 +200,5 @@ async def list_my_files(
     返回:
         文件元数据列表
     """
-    Authorize.jwt_required()
-    current_user = Authorize.get_jwt_subject()
     
-    return await get_user_files(db, current_user, include_public) 
+    return await get_user_files(db, auth.decode_jwt_to_uid(Authorize), include_public) 

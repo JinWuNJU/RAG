@@ -1,8 +1,8 @@
 import os
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+
 # 加载环境变量
 load_dotenv()
 
@@ -25,11 +25,13 @@ engine = create_engine(
     }
 )
 
+# 建表
+from database.model import Base
+Base.metadata.create_all(bind=engine)
+
 # 会话工厂
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# ORM基类
-Base = declarative_base()
 
 def get_db():
     db = SessionLocal()

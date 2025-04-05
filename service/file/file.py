@@ -4,19 +4,16 @@ from typing import List, Optional
 from uuid import UUID
 from sqlalchemy import or_
 
-from model.file.file import FileDB, FileMetadata, FileTypeError, FileSizeError
-from service.database import engine
-from service.user.models import User
-
-from model.file.file import Base
-Base.metadata.create_all(bind=engine)
+from database.model.file import *
+from rest_model.file import FileMetadata, FileTypeError, FileSizeError
+from database.model.user import User
 
 async def upload_to_database(
     file: UploadFile, 
     db: Session,
+    user_id: UUID,
     allowed_types: Optional[List[str]] = None,
     max_size_mb: Optional[float] = None,
-    user_name: Optional[str] = None,
     is_public: bool = False
 ) -> UUID:
     """
@@ -27,7 +24,7 @@ async def upload_to_database(
         db: Database session
         allowed_types: List of allowed MIME types. If None, all types are allowed
         max_size_mb: Maximum file size in MB. If None, no limit
-        user_name
+        user_id
         is_public: Whether the file is publicly accessible
         
     Returns:
@@ -42,18 +39,12 @@ async def upload_to_database(
     if max_size_mb and file_size > max_size_mb * 1024 * 1024:
         raise FileSizeError(f"File size exceeds maximum allowed size of {max_size_mb} MB")
     
-    user_uuid = None
-    if user_name:
-        user = db.query(User).filter(User.username == user_name).first()
-        if user:
-            user_uuid = user.id
-    
     db_file = FileDB()
     db_file.filename = file.filename
     db_file.content_type = file.content_type
     db_file.size = file_size
     db_file.data = content
-    db_file.user_id = user_uuid
+    db_file.user_id = user_id
     db_file.is_public = is_public
     
     db.add(db_file)
@@ -62,14 +53,14 @@ async def upload_to_database(
     
     return db_file.id
 
-async def get_file_by_id(file_id: UUID, db: Session, current_user: Optional[str] = None) -> FileDB:
+async def get_file_by_id(file_id: UUID, db: Session, user_id: UUID) -> FileDB:
     """
     Get a file by its ID
     
     Args:
         file_id: UUID of the file
         db: Database session
-        current_user
+        user_id: UUID of user
         
     Returns:
         FileDB object
@@ -82,23 +73,22 @@ async def get_file_by_id(file_id: UUID, db: Session, current_user: Optional[str]
         raise HTTPException(status_code=404, detail="File not found")
     
     if not file.is_public and file.user_id:
-        if not current_user:
+        if not user_id:
             raise HTTPException(status_code=401, detail="Authentication required to access this file")
         
-        user = db.query(User).filter(User.username == current_user).first()
-        if not user or user.id != file.user_id:
+        if not user_id or user_id != file.user_id:
             raise HTTPException(status_code=403, detail="Permission denied to access this file")
     
     return file
 
-async def get_file_metadata(file_id: UUID, db: Session, current_user: Optional[str] = None) -> FileMetadata:
+async def get_file_metadata(file_id: UUID, db: Session, user_id: UUID) -> FileMetadata:
     """
     Get file metadata without the actual file content
     
     Args:
         file_id: UUID of the file
         db: Database session
-        current_user
+        user_id: UUID of user
         
     Returns:
         FileMetadata object
@@ -106,7 +96,7 @@ async def get_file_metadata(file_id: UUID, db: Session, current_user: Optional[s
     Raises:
         HTTPException: If file not found or permission denied
     """
-    file = await get_file_by_id(file_id, db, current_user)
+    file = await get_file_by_id(file_id, db, user_id)
     
     return FileMetadata(
         id=file.id,
@@ -118,14 +108,14 @@ async def get_file_metadata(file_id: UUID, db: Session, current_user: Optional[s
         updated_at=file.updated_at
     )
 
-async def delete_file(file_id: UUID, db: Session, current_user: Optional[str] = None) -> bool:
+async def delete_file(file_id: UUID, db: Session, user_id: Optional[UUID] = None) -> bool:
     """
     Delete a file by its ID
     
     Args:
         file_id: UUID of the file
         db: Database session
-        current_user
+        user_id: UUID of the user requesting deletion
         
     Returns:
         True if successful
@@ -133,46 +123,34 @@ async def delete_file(file_id: UUID, db: Session, current_user: Optional[str] = 
     Raises:
         HTTPException: If file not found or permission denied
     """
-    file = await get_file_by_id(file_id, db, current_user)
-    
-    if file.user_id:
-        if not current_user:
-            raise HTTPException(status_code=401, detail="Authentication required to delete this file")
-        
-        user = db.query(User).filter(User.username == current_user).first()
-        if not user or user.id != file.user_id:
-            raise HTTPException(status_code=403, detail="Permission denied to delete this file")
+    file = await get_file_by_id(file_id, db, user_id)
     
     db.delete(file)
     db.commit()
     
     return True
 
-async def get_user_files(db: Session, user_name: str, include_public: bool = False):
+async def get_user_files(db: Session, user_id: UUID, include_public: bool = False):
     """
-    获取用户的所有文件
+    Get all files for a user
     
     Args:
-        db: 数据库会话
-        user_name: 用户名
-        include_public: 是否包含公开文件
+        db: Database session
+        user_id: UUID of the user
+        include_public: Whether to include public files
         
     Returns:
-        包含FileMetadata的列表
+        List of FileMetadata objects
     """
-    user = db.query(User).filter(User.username == user_name).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
     if include_public:
         files = db.query(FileDB).filter(
             or_(
-                FileDB.user_id == user.id,
+                FileDB.user_id == user_id,
                 FileDB.is_public == True
             )
         ).all()
     else:
-        files = db.query(FileDB).filter(FileDB.user_id == user.id).all()
+        files = db.query(FileDB).filter(FileDB.user_id == user_id).all()
     
     result = []
     for file in files:
@@ -188,4 +166,4 @@ async def get_user_files(db: Session, user_name: str, include_public: bool = Fal
             )
         )
     
-    return result 
+    return result
