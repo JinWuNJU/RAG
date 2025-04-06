@@ -185,7 +185,7 @@ async def upload_knowledge(
     except FileSizeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.get("/my-files", response_model=List[FileMetadata])
+@router.get("/", response_model=List[FileMetadata])
 async def list_my_files(
     include_public: bool = Query(False, description="包含所有公开文件"),
     db: Session = Depends(get_db),
