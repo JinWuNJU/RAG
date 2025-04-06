@@ -1,13 +1,16 @@
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 from sqlalchemy import CheckConstraint, Boolean, Index, String, Integer, Float, DateTime, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from pgvector.sqlalchemy import Vector
 from sqlalchemy.sql import func
 import uuid
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database.model import Base
+
+if TYPE_CHECKING:
+    from database.model.user import User
 
 class KnowledgeBase(Base):
     __tablename__ = 'knowledge_bases'
@@ -22,6 +25,8 @@ class KnowledgeBase(Base):
     hybrid_ratio: Mapped[float] = mapped_column(Float, server_default='0.5')
     is_public: Mapped[bool] = mapped_column(Boolean, server_default='false', nullable=False)
     uploader_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey('users.id'), nullable=False)
+
+    uploader: Mapped["User"] = relationship("User", back_populates="knowledge_bases")
 
     # Table constraints and indexes
     __table_args__ = (

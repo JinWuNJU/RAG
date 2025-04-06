@@ -1,11 +1,15 @@
 from datetime import datetime
+from typing import TYPE_CHECKING
 from uuid import UUID
 import uuid
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String
-from database.model import Base
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from database.model.user import User
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
+
+from database.model import Base
+
+if TYPE_CHECKING:
+    from database.model.user import User
 
 class FileDB(Base):
     """数据库文件存储模型"""
@@ -21,4 +25,4 @@ class FileDB(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     # 关联ORM
-    user: Mapped["User"] = relationship("User")
+    user: Mapped["User"] = relationship("User", back_populates="files")
