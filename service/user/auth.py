@@ -30,7 +30,12 @@ def gen_user_jwt(Authorize: AuthJWT, db_user: User):
 def decode_jwt_to_uid(Authorize: AuthJWT):
     try:
         Authorize.jwt_required()
-        user_id: str = Authorize.get_jwt_subject()
+        user_id = Authorize.get_jwt_subject()
+        if not user_id or not isinstance(user_id, str):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="无效的用户ID",
+            )
         return UUID(user_id)
     except Exception as e:
         raise HTTPException(

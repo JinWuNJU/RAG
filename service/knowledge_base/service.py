@@ -6,6 +6,7 @@ import re
 
 from database.model.file import FileDB
 from database.model.knowledge_base import *
+from uuid import UUID
 
 class TextFileProcessor:
     def __init__(self, db: Session):

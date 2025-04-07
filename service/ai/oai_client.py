@@ -40,7 +40,7 @@ class WrappedAsyncOpenAI:
 aiClient = WrappedAsyncOpenAI(
     OpenAIConfig(
         api_key=os.environ["VOLCENGINE_API_KEY"],
-        base_url="https://ark.cn-beijing.volces.com/api/v3/",
+        base_url=HttpUrl("https://ark.cn-beijing.volces.com/api/v3/"),
         model="deepseek-v3-2450324"
     )
 )

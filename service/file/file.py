@@ -30,6 +30,9 @@ async def upload_to_database(
     Returns:
         UUID of the uploaded file
     """
+    if file.content_type is None:
+        raise FileTypeError("File type is missing")
+    
     if allowed_types and file.content_type not in allowed_types:
         raise FileTypeError(f"File type {file.content_type} not allowed. Allowed types: {', '.join(allowed_types)}")
     
@@ -39,6 +42,9 @@ async def upload_to_database(
     if max_size_mb and file_size > max_size_mb * 1024 * 1024:
         raise FileSizeError(f"File size exceeds maximum allowed size of {max_size_mb} MB")
     
+    if file.filename is None:
+        raise FileTypeError("File name is missing")
+
     db_file = FileDB()
     db_file.filename = file.filename
     db_file.content_type = file.content_type
@@ -108,7 +114,7 @@ async def get_file_metadata(file_id: UUID, db: Session, user_id: UUID) -> FileMe
         updated_at=file.updated_at
     )
 
-async def delete_file(file_id: UUID, db: Session, user_id: Optional[UUID] = None) -> bool:
+async def delete_file(file_id: UUID, db: Session, user_id: UUID) -> bool:
     """
     Delete a file by its ID
     
