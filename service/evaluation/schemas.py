@@ -38,7 +38,6 @@ class EvaluationTaskItem(BaseModel):
     id: str
     name: str
     created_at: Union[datetime, int]
-    updated_at: Union[datetime, int]
     metric_id: str
     metric_name: str
     status: str

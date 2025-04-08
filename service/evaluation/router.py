@@ -5,6 +5,7 @@ from uuid import UUID
 import json
 import uuid
 from datetime import datetime
+import asyncio
 
 from database import get_db
 from database.model.file import FileDB
@@ -91,21 +92,20 @@ async def get_record_detail(
 @router.post("/tasks", response_model=EvaluationTaskCreateResponse)
 async def create_evaluation_task(
     request: EvaluationRequest,
-    background_tasks: BackgroundTasks,
     Authorize: AuthJWT = Depends(),
     db: Session = Depends(get_db)
 ):
     """创建评估任务
     1. 验证用户和文件
     2. 创建任务和记录数据库条目
-    3. 启动后台评估任务
-    4. 返回任务ID和记录ID
+    3. 立即返回任务ID和记录ID
+    4. 异步启动评估任务
     """
     # 1. 认证用户
     user_id = decode_jwt_to_uid(Authorize)
     service = EvaluationService(db)
 
-    # 2. 验证文件存在且是JSON格式
+    # 2. 验证文件存在
     file_record = db.query(FileDB).filter(
         FileDB.id == request.file_id,
         FileDB.user_id == user_id  # 确保用户只能访问自己的文件
@@ -115,17 +115,6 @@ async def create_evaluation_task(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="文件不存在或无权访问"
-        )
-
-    try:
-        # 尝试解析文件内容
-        file_content = json.loads(file_record.data.decode('utf-8'))
-        if not isinstance(file_content, list):
-            raise ValueError("文件内容必须是JSON数组")
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"文件解析失败: {str(e)}"
         )
 
     # 3. 创建数据库记录
@@ -161,20 +150,80 @@ async def create_evaluation_task(
             detail=f"创建评估任务失败: {str(e)}"
         )
 
-    # 4. 启动后台评估任务
-    background_tasks.add_task(
-        run_evaluation_in_background,
-        db=db,
-        record_id=record_id,
-        file_content=file_content,
-        metric_id=request.metric_id,
-        system_prompt=request.system_prompt
-    )
-
-    return EvaluationTaskCreateResponse(
+    # 4. 立即返回任务ID和记录ID
+    response = EvaluationTaskCreateResponse(
         task_id=str(task_id),
         record_id=str(record_id)
     )
+
+    # 5. 异步启动评估任务
+    # 使用独立的数据库会话
+    from sqlalchemy.orm import sessionmaker
+    from database import engine
+    LocalSession = sessionmaker(bind=engine)
+    
+    async def run_async():
+        local_db = LocalSession()
+        try:
+            await run_evaluation_async(
+                db=local_db,
+                record_id=record_id,
+                file_id=request.file_id,
+                metric_id=request.metric_id,
+                system_prompt=request.system_prompt
+            )
+        finally:
+            local_db.close()
+
+    # 使用 asyncio.create_task 启动异步任务
+    asyncio.create_task(run_async())
+    print("任务创建完成，准备返回响应")
+    return response
+
+async def run_evaluation_async(
+    db: Session,
+    record_id: UUID,
+    file_id: str,
+    metric_id: str,
+    system_prompt: str
+):
+    """异步执行评估任务"""
+    from sqlalchemy.orm import sessionmaker
+    from database import engine
+    from loguru import logger
+
+    # 创建独立session避免主线程session问题
+    LocalSession = sessionmaker(bind=engine)
+    local_db = LocalSession()
+
+    try:
+        # 获取文件内容
+        file_record = local_db.query(FileDB).filter(FileDB.id == file_id).first()
+        if not file_record:
+            raise ValueError("文件不存在")
+
+        file_content = json.loads(file_record.data.decode('utf-8'))
+        if not isinstance(file_content, list):
+            raise ValueError("文件内容必须是JSON数组")
+
+        # 执行评估
+        await run_evaluation_in_background(
+            db=local_db,
+            record_id=record_id,
+            file_content=file_content,
+            metric_id=metric_id,
+            system_prompt=system_prompt
+        )
+    except Exception as e:
+        logger.error(f"评估任务执行失败: {str(e)}")
+        # 更新任务状态为失败
+        record = local_db.query(EvaluationRecord).filter_by(id=record_id).first()
+        if record:
+            record.task.status = "failed"
+            record.task.error_message = str(e)
+            local_db.commit()
+    finally:
+        local_db.close()
 
 @router.post("/iterations", response_model=EvaluationIterationResponse)
 async def create_iteration(
@@ -297,6 +346,38 @@ async def delete_task(
         )
     
     return DeleteTaskResponse(**result)
+
+@router.get("/tasks/{task_id}", response_model=EvaluationTaskItem)
+async def get_task_detail(
+    task_id: UUID,
+    Authorize: AuthJWT = Depends(),
+    db: Session = Depends(get_db)
+):
+    """获取任务详情"""
+    user_id = decode_jwt_to_uid(Authorize)
+    service = EvaluationService(db)
+    
+    task = db.query(EvaluationTask).filter(
+        EvaluationTask.id == task_id,
+        EvaluationTask.user_id == user_id
+    ).first()
+    
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="任务不存在或无权访问"
+        )
+    
+    return EvaluationTaskItem(
+        id=str(task.id),
+        name=task.name,
+        created_at=task.created_at,
+        metric_id=task.records[0].metric_id if task.records else "",
+        metric_name=service.metrics.get(task.records[0].metric_id, {}).get("name", "") if task.records else "",
+        status=task.status,
+        dataset_id=str(task.records[0].file_id) if task.records else "",
+        iterations=len(task.records)
+    )
 
 async def run_evaluation_in_background(
     db: Session,
