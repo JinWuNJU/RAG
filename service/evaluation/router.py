@@ -29,25 +29,23 @@ from ..user.user_router import router as user_router
 __all__ = ["evaluation_router", "user_router"]
 router = APIRouter(tags=["evaluation"], prefix="/evaluation")
 
+
 @router.get("/metrics", response_model=list[Metric])
 async def get_metrics(db: Session = Depends(get_db)):
     """获取可用评估指标"""
     service = EvaluationService(db)
     return [
-        Metric(
-            id=metric_id,
-            name=details["name"],
-            description=details["description"]
-        )
-        for metric_id, details in service.metrics.items()
+        Metric(id=k, name=v["name"], description=v["description"])
+        for k, v in service.metrics.items()
     ]
+
 
 @router.get("/tasks", response_model=EvaluationTasksResponse)
 async def get_tasks(
-    page: int = 1,
-    page_size: int = 10,
-    Authorize: AuthJWT = Depends(),
-    db: Session = Depends(get_db)
+        page: int = 1,
+        page_size: int = 10,
+        Authorize: AuthJWT = Depends(),
+        db: Session = Depends(get_db)
 ):
     """获取评估任务列表，支持分页"""
     user_id = decode_jwt_to_uid(Authorize)
@@ -61,11 +59,12 @@ async def get_tasks(
         total=result["total"]
     )
 
+
 @router.get("/tasks/{task_id}/records", response_model=list[EvaluationRecordResponse])
 async def get_task_records(
-    task_id: UUID,
-    Authorize: AuthJWT = Depends(),
-    db: Session = Depends(get_db)
+        task_id: UUID,
+        Authorize: AuthJWT = Depends(),
+        db: Session = Depends(get_db)
 ):
     """获取任务的所有评估记录"""
     user_id = decode_jwt_to_uid(Authorize)
@@ -74,11 +73,12 @@ async def get_task_records(
     records = service.get_task_records(task_id, user_id)
     return [EvaluationRecordResponse(**record) for record in records]
 
+
 @router.get("/records/{record_id}", response_model=EvaluationRecordResponse)
 async def get_record_detail(
-    record_id: UUID,
-    Authorize: AuthJWT = Depends(),
-    db: Session = Depends(get_db)
+        record_id: UUID,
+        Authorize: AuthJWT = Depends(),
+        db: Session = Depends(get_db)
 ):
     """获取评估记录详情"""
     user_id = decode_jwt_to_uid(Authorize)
@@ -93,11 +93,12 @@ async def get_record_detail(
 
     return EvaluationRecordResponse(**record)
 
+
 @router.post("/tasks", response_model=EvaluationTaskCreateResponse)
 async def create_evaluation_task(
-    request: EvaluationRequest,
-    Authorize: AuthJWT = Depends(),
-    db: Session = Depends(get_db)
+        request: EvaluationRequest,
+        Authorize: AuthJWT = Depends(),
+        db: Session = Depends(get_db)
 ):
     """创建评估任务
     1. 验证用户和文件
@@ -105,13 +106,6 @@ async def create_evaluation_task(
     3. 立即返回任务ID和记录ID
     4. 异步启动评估任务
     """
-    from uuid import uuid4
-    from datetime import datetime
-    from database.model.evaluation import EvaluationTask, EvaluationRecord
-    from database.model.file import FileDB
-    # 新增迭代版本控制
-    task_version = 1  # 初始版本为1
-
     # 1. 认证用户
     user_id = decode_jwt_to_uid(Authorize)
     service = EvaluationService(db)
@@ -139,7 +133,6 @@ async def create_evaluation_task(
             name=request.task_name,
             user_id=user_id,
             status="processing",
-            version=task_version,
             created_at=datetime.utcnow()
         )
         db.add(task)
@@ -192,12 +185,13 @@ async def create_evaluation_task(
     print("任务创建完成，准备返回响应")
     return response
 
+
 async def run_evaluation_async(
-    db: Session,
-    record_id: UUID,
-    file_id: str,
-    metric_id: str,
-    system_prompt: str
+        db: Session,
+        record_id: UUID,
+        file_id: str,
+        metric_id: str,
+        system_prompt: str
 ):
     """异步执行评估任务"""
     from sqlalchemy.orm import sessionmaker
@@ -237,12 +231,13 @@ async def run_evaluation_async(
     finally:
         local_db.close()
 
+
 @router.post("/iterations", response_model=EvaluationIterationResponse)
 async def create_iteration(
-    request: EvaluationIterationRequest,
-    background_tasks: BackgroundTasks,
-    Authorize: AuthJWT = Depends(),
-    db: Session = Depends(get_db)
+        request: EvaluationIterationRequest,
+        background_tasks: BackgroundTasks,
+        Authorize: AuthJWT = Depends(),
+        db: Session = Depends(get_db)
 ):
     """创建评估迭代
     1. 验证用户和任务
@@ -341,9 +336,9 @@ async def create_iteration(
 
 @router.delete("/tasks/{task_id}", response_model=DeleteTaskResponse)
 async def delete_task(
-    task_id: UUID,
-    Authorize: AuthJWT = Depends(),
-    db: Session = Depends(get_db)
+        task_id: UUID,
+        Authorize: AuthJWT = Depends(),
+        db: Session = Depends(get_db)
 ):
     """删除评估任务及其所有记录"""
     user_id = decode_jwt_to_uid(Authorize)
@@ -359,11 +354,12 @@ async def delete_task(
 
     return DeleteTaskResponse(**result)
 
+
 @router.get("/tasks/{task_id}", response_model=EvaluationTaskItem)
 async def get_task_detail(
-    task_id: UUID,
-    Authorize: AuthJWT = Depends(),
-    db: Session = Depends(get_db)
+        task_id: UUID,
+        Authorize: AuthJWT = Depends(),
+        db: Session = Depends(get_db)
 ):
     """获取任务详情"""
     user_id = decode_jwt_to_uid(Authorize)
@@ -390,25 +386,14 @@ async def get_task_detail(
         dataset_id=str(task.records[0].file_id) if task.records else "",
         iterations=len(task.records)
     )
-    # 4. 启动后台评估任务
-    background_tasks.add_task(
-        run_evaluation_in_background,
-        db=db,
-        record_id=record_id,
-        file_content=file_content,
-        metric_id=request.metric_id,
-        task_version=task_version,
-        system_prompt=request.system_prompt
-    )
 
-    return record_id
 
 async def run_evaluation_in_background(
-    db: Session,
-    record_id: UUID,
-    file_content: list,
-    metric_id: str,
-    system_prompt: str
+        db: Session,
+        record_id: UUID,
+        file_content: list,
+        metric_id: str,
+        system_prompt: str
 ):
     """后台执行评估任务"""
     from sqlalchemy.orm import sessionmaker
@@ -516,11 +501,7 @@ async def run_evaluation_in_background(
         # 更新评估记录
         record = local_db.query(EvaluationRecord).filter_by(id=record_id).first()
         if record:
-            record.results = {
-                "scores": result.scores,
-                "questions": questions,
-                "answers": answers
-            }
+            record.results = detailed_results
             record.task.status = "completed"
             local_db.commit()
             logger.success(f"评估记录 {record_id} 完成")
@@ -537,79 +518,3 @@ async def run_evaluation_in_background(
             local_db.commit()
     finally:
         local_db.close()
-
-@router.get("/records/{record_id}", response_model=EvaluationRecordResponse)
-async def get_evaluation_record(
-    record_id: UUID,
-    db: Session = Depends(get_db)
-):
-    """获取评估结果"""
-    record = db.query(EvaluationRecord).filter_by(id=record_id).first()
-    if not record:
-        raise HTTPException(status_code=404, detail="评估记录不存在")
-
-    return {
-        "id": record.id,
-        "created_at": record.created_at.isoformat(),
-        "results": record.results
-    }
-
-@router.delete("/tasks/{task_id}")
-async def delete_evaluation_task(
-    task_id: UUID,
-    Authorize: AuthJWT = Depends(),
-    db: Session = Depends(get_db)
-):
-    """删除评估任务"""
-    user_id = decode_jwt_to_uid(Authorize)
-
-    task = db.query(EvaluationTask).filter(
-        EvaluationTask.id == task_id,
-        EvaluationTask.user_id == user_id
-    ).first()
-
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="任务不存在或无权访问"
-        )
-
-    try:
-        # 删除相关记录
-        db.query(EvaluationRecord).filter_by(task_id=task_id).delete()
-        # 删除任务
-        db.delete(task)
-        db.commit()
-        return {"message": "删除成功"}
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"删除失败: {str(e)}"
-        )
-
-
-@router.post("/tasks/{task_id}/iterate")
-async def iterate_evaluation_task(
-    task_id: UUID,
-    request: EvaluationRequest,
-    Authorize: AuthJWT = Depends(),
-    db: Session = Depends(get_db)
-):
-    """迭代评估任务"""
-    # 获取原任务
-    original_task = db.query(EvaluationTask).get(task_id)
-    if not original_task:
-        raise HTTPException(status_code=404, detail="任务不存在")
-
-    # 创建新版本记录
-    new_version = original_task.version + 1
-    new_task = EvaluationTask(
-        id=uuid.uuid4(),
-        name=f"{original_task.name} v{new_version}",
-        user_id=original_task.user_id,
-        version=new_version,
-        previous_version=original_task.id,
-        # ...其他字段...
-    )
-    # ...保存并启动评估...
