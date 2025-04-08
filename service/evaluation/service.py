@@ -10,6 +10,7 @@ from ragas import evaluate
 from ragas.metrics import answer_relevancy, faithfulness
 import uuid
 from datasets import Dataset
+from utils.datetime_tools import get_beijing_time, to_timestamp_ms  # 导入工具函数
 
 from database.model.evaluation import EvaluationTask, EvaluationRecord
 
@@ -136,8 +137,8 @@ class EvaluationService:
             task_items.append({
                 "id": str(task.id),
                 "name": task.name,
-                "created_at": int(task.created_at.timestamp() * 1000),
-                "updated_at": int(updated_at.timestamp() * 1000),
+                "created_at": to_timestamp_ms(task.created_at),
+                "updated_at": to_timestamp_ms(updated_at),
                 "metric_id": metric_id,
                 "metric_name": metric_name,
                 "status": task.status,
@@ -196,7 +197,7 @@ class EvaluationService:
                 "id": str(record.id),
                 "task_id": str(record.task_id),
                 "system_prompt": record.system_prompt,
-                "created_at": int(record.created_at.timestamp() * 1000),
+                "created_at": to_timestamp_ms(record.created_at),
                 "status": task.status,
                 "score": score,
                 "detailed_results": record.results
@@ -242,7 +243,7 @@ class EvaluationService:
             "id": str(record.id),
             "task_id": str(record.task_id),
             "system_prompt": record.system_prompt,
-            "created_at": int(record.created_at.timestamp() * 1000),
+            "created_at": to_timestamp_ms(record.created_at),
             "status": record.task.status,
             "score": score,
             "detailed_results": record.results
@@ -276,7 +277,7 @@ class EvaluationService:
             metric_id=previous_record.metric_id,
             system_prompt=system_prompt,
             file_id=previous_record.file_id,
-            created_at=datetime.utcnow()
+            created_at=get_beijing_time()
         )
 
         # 更新任务状态

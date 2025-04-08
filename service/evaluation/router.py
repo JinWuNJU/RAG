@@ -22,6 +22,7 @@ from .schemas import (
     EvaluationIterationResponse, DeleteTaskResponse
 )
 from ..user.auth import decode_jwt_to_uid
+from utils.datetime_tools import get_beijing_time, to_timestamp_ms  # 导入工具函数
 
 from . import router as evaluation_router
 from ..user.user_router import router as user_router
@@ -133,7 +134,7 @@ async def create_evaluation_task(
             name=request.task_name,
             user_id=user_id,
             status="processing",
-            created_at=datetime.utcnow()
+            created_at=get_beijing_time()
         )
         db.add(task)
 
@@ -144,7 +145,7 @@ async def create_evaluation_task(
             metric_id=request.metric_id,
             system_prompt=request.system_prompt,
             file_id=UUID(request.file_id),
-            created_at=datetime.utcnow()
+            created_at=get_beijing_time()
         )
         db.add(record)
         db.commit()
@@ -303,7 +304,7 @@ async def create_iteration(
             metric_id=previous_record.metric_id,
             system_prompt=request.system_prompt,
             file_id=previous_record.file_id,
-            created_at=datetime.utcnow()
+            created_at=get_beijing_time()  # 使用北京时间
         )
 
         # 更新任务状态
@@ -379,7 +380,7 @@ async def get_task_detail(
     return EvaluationTaskItem(
         id=str(task.id),
         name=task.name,
-        created_at=task.created_at,
+        created_at=to_timestamp_ms(task.created_at),  # 使用工具函数
         metric_id=task.records[0].metric_id if task.records else "",
         metric_name=service.metrics.get(task.records[0].metric_id, {}).get("name", "") if task.records else "",
         status=task.status,
