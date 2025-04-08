@@ -17,17 +17,22 @@ router = APIRouter(tags=["user"], prefix="/user")
 
 # JWT 配置
 class Settings(BaseModel):
-    authjwt_secret_key: str = os.getenv("JWT_SECRET_KEY")
+    authjwt_secret_key: str = os.getenv("JWT_SECRET_KEY", str(uuid.uuid4()))
 
-@AuthJWT.load_config
+@AuthJWT.load_config # type: ignore
 def get_config():
     return Settings()
 
 # 异常处理器
-def authjwt_exception_handler(request: Request, exc: AuthJWTException):
+def authjwt_exception_handler(request: Request, exc: Exception):
+    if isinstance(exc, AuthJWTException):
+        return JSONResponse(
+            status_code=exc.status_code, # type: ignore
+            content={"detail": exc.message} # type: ignore
+        )
     return JSONResponse(
-        status_code=exc.status_code,
-        content={"detail": exc.message}
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "Internal Server Error"}
     )
 
 # 注册接口

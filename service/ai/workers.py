@@ -3,7 +3,7 @@ from typing import Awaitable, Callable, Coroutine, List
 from pydantic import BaseModel
 
 # worker函数类型，接收任务队列和结果列表作为参数
-WorkerType = Callable[[asyncio.Queue, List[BaseModel]], Coroutine[None, None, None]]
+WorkerType = Callable[[asyncio.Queue, List[BaseModel | None]], Coroutine[None, None, None]]
 
 def worker_wrapper():
     """
@@ -27,7 +27,7 @@ def worker_wrapper():
     ```
     """
     def decorator(func: Callable[[int], Awaitable[BaseModel | None]]) -> WorkerType:
-        async def wrapper(queue: asyncio.Queue, result: List[BaseModel]) -> None:
+        async def wrapper(queue: asyncio.Queue, result: List[BaseModel | None]) -> None:
             """
             包装后的异步任务函数，从队列中获取任务并执行。
             
