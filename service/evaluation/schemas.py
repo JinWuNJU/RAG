@@ -23,3 +23,9 @@ class EvaluationRecordResponse(BaseModel):
     id: UUID
     created_at: str
     results: List[EvaluationResultItem]
+
+class EvaluationRequest(BaseModel):
+    name: str  # 确保字段名与前端一致
+    system_prompt: str
+    metric_id: str
+    file_id: str

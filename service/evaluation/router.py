@@ -17,11 +17,15 @@ router = APIRouter(tags=["evaluation"], prefix="/evaluation")
 
 @router.get("/metrics", response_model=list[Metric])
 async def get_metrics(db: Session = Depends(get_db)):
-    """获取可用评估指标"""
+    """获取可用评估指标列表"""
     service = EvaluationService(db)
     return [
-        Metric(id=k, name=v["name"], description=v["description"])
-        for k, v in service.metrics.items()
+        Metric(
+            id=metric_id,
+            name=details["name"],
+            description=details["description"]
+        )
+        for metric_id, details in service.metrics.items()
     ]
 
 @router.post("/tasks", response_model=UUID)
@@ -41,6 +45,8 @@ async def create_evaluation_task(
     from datetime import datetime
     from database.model.evaluation import EvaluationTask, EvaluationRecord
     from database.model.file import FileDB
+    # 新增迭代版本控制
+    task_version = 1  # 初始版本为1
 
     # 1. 认证用户
     user_id = decode_jwt_to_uid(Authorize)
@@ -80,6 +86,7 @@ async def create_evaluation_task(
             name=request.task_name,
             user_id=user_id,
             status="processing",
+            version=task_version,
             created_at=datetime.utcnow()
         )
         db.add(task)
@@ -109,6 +116,7 @@ async def create_evaluation_task(
         record_id=record_id,
         file_content=file_content,
         metric_id=request.metric_id,
+        task_version=task_version,
         system_prompt=request.system_prompt
     )
 
@@ -176,3 +184,79 @@ async def run_evaluation_in_background(
             local_db.commit()
     finally:
         local_db.close()
+
+@router.get("/records/{record_id}", response_model=EvaluationRecordResponse)
+async def get_evaluation_record(
+    record_id: UUID,
+    db: Session = Depends(get_db)
+):
+    """获取评估结果"""
+    record = db.query(EvaluationRecord).filter_by(id=record_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="评估记录不存在")
+
+    return {
+        "id": record.id,
+        "created_at": record.created_at.isoformat(),
+        "results": record.results
+    }
+
+@router.delete("/tasks/{task_id}")
+async def delete_evaluation_task(
+    task_id: UUID,
+    Authorize: AuthJWT = Depends(),
+    db: Session = Depends(get_db)
+):
+    """删除评估任务"""
+    user_id = decode_jwt_to_uid(Authorize)
+
+    task = db.query(EvaluationTask).filter(
+        EvaluationTask.id == task_id,
+        EvaluationTask.user_id == user_id
+    ).first()
+
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="任务不存在或无权访问"
+        )
+
+    try:
+        # 删除相关记录
+        db.query(EvaluationRecord).filter_by(task_id=task_id).delete()
+        # 删除任务
+        db.delete(task)
+        db.commit()
+        return {"message": "删除成功"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"删除失败: {str(e)}"
+        )
+
+
+@router.post("/tasks/{task_id}/iterate")
+async def iterate_evaluation_task(
+    task_id: UUID,
+    request: EvaluationRequest,
+    Authorize: AuthJWT = Depends(),
+    db: Session = Depends(get_db)
+):
+    """迭代评估任务"""
+    # 获取原任务
+    original_task = db.query(EvaluationTask).get(task_id)
+    if not original_task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    # 创建新版本记录
+    new_version = original_task.version + 1
+    new_task = EvaluationTask(
+        id=uuid.uuid4(),
+        name=f"{original_task.name} v{new_version}",
+        user_id=original_task.user_id,
+        version=new_version,
+        previous_version=original_task.id,
+        # ...其他字段...
+    )
+    # ...保存并启动评估...
