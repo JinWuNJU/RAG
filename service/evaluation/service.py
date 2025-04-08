@@ -131,14 +131,12 @@ class EvaluationService:
             metric_id = latest_record.metric_id if latest_record else ""
             metric_name = self.metrics.get(metric_id, {}).get("name", "未知指标") if metric_id else "未知指标"
 
-            # 获取最后更新时间
-            updated_at = latest_record.created_at if latest_record else task.created_at
+
 
             task_items.append({
                 "id": str(task.id),
                 "name": task.name,
                 "created_at": to_timestamp_ms(task.created_at),
-                "updated_at": to_timestamp_ms(updated_at),
                 "metric_id": metric_id,
                 "metric_name": metric_name,
                 "status": task.status,

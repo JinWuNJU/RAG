@@ -1,4 +1,3 @@
-
 from fastapi_jwt_auth2.exceptions import AuthJWTException
 
 from service.ai.chat import chat
@@ -37,4 +36,3 @@ app.add_exception_handler(AuthJWTException, authjwt_exception_handler)
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-    
