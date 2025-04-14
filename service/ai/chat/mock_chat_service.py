@@ -4,6 +4,8 @@ import uuid
 from typing import List
 from uuid import UUID
 
+from fastapi_jwt_auth2 import AuthJWT
+from sqlalchemy.orm import Session
 from sse_starlette import EventSourceResponse
 
 from rest_model.chat.completions import MessagePayload
@@ -212,19 +214,19 @@ async def event_generator(chat_id: UUID, user_message_id: UUID, assistant_messag
 class MockChatService(BaseChatService):
     """聊天服务Mock实现"""
 
-    async def get_chat(self, chat_id: str):
+    async def get_chat(self, db: Session, Authorize: AuthJWT, chat_id: str):
         chat = [history for history in mock_history if str(history.id) == chat_id]
         if not chat:
             return {}
         return chat[0]
 
-    async def get_history(self, page: int = 1):
+    async def get_history(self, db: Session, Authorize: AuthJWT, page: int = 1):
         page_size = 3  # 让分页更加明显
         start = (page - 1) * page_size
         end = start + page_size
         return mock_history[start:end]
 
-    async def message_stream(self, payload: MessagePayload) -> EventSourceResponse:
+    async def message_stream(self, db: Session, Authorize: AuthJWT, payload: MessagePayload) -> EventSourceResponse:
         current_timestamp = int(time.time())
         new_chat = True
         new_user_message = ChatMessage(

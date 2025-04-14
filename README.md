@@ -80,7 +80,11 @@ DB_USER=数据库用户名 (例如: postgres)
 DB_PASS=数据库密码
 
 MOCKING_CHAT=true or false # 是否使用模拟llm聊天服务，默认true
+
+# rag对话功能依赖
+CHAT_LLM_MODEL_ID=聊天模型ID
 VOLCENGINE_API_KEY=火山引擎API KEY
 VOLCENENGINE_API_ENDPOINT=火山引擎API ENDPOINT
+
 ZHIPU_API_KEY=智谱AI API KEY
 ```

@@ -22,7 +22,7 @@ class ToolCallEvent(BaseEvent):
     """工具调用事件"""
     type: Annotated[str, Literal["call"]] = "call"
     name: str = Field(..., description="工具名称")
-    params: RetrieveParams = Field(..., description="工具参数")
+    params: RetrieveParams | str | dict = Field(..., description="工具参数")
     description: str = Field(..., description="调用描述")
 
 class DocReturnEvent(BaseEvent):
