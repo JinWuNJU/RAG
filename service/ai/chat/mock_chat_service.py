@@ -1,17 +1,16 @@
 import asyncio
-import json
 import time
-from typing import List
 import uuid
+from typing import List
 from uuid import UUID
-from fastapi import APIRouter
+
 from sse_starlette import EventSourceResponse
 
 from rest_model.chat.completions import MessagePayload
 from rest_model.chat.history import ChatDetail, ChatHistory, ChatMessage
-from rest_model.chat.sse import ChatBeginEvent, ChatEvent, DocReturnEvent, Document, RetrieveParams, SseEventPackage, ToolCallEvent, ToolEvent
-
-
+from rest_model.chat.sse import ChatBeginEvent, ChatEvent, DocReturnEvent, Document, RetrieveParams, SseEventPackage, \
+    ToolCallEvent, ToolEvent
+from service.ai.chat.service_base import BaseChatService
 
 # Mock数据说明：
 # 以下mock数据用于模拟一个物理问答系统的典型交互流程，包含：
@@ -184,26 +183,6 @@ mock_history: List[ChatHistory] = [
 ]
 
 
-router = APIRouter()
-
-
-# 获取单个对话详情接口
-@router.get("/chats/{chat_id}")
-async def get_chat(chat_id: str) -> ChatHistory | dict:
-    chat = [history for history in mock_history if str(history.id) == chat_id]
-    if not chat:
-        return {}
-    return chat[0]
-
-# 获取对话历史接口 - 支持分页
-@router.get("/chats")
-async def get_history(page: int = 1):
-    page_size = 3  # 让分页更加明显
-    start = (page - 1) * page_size
-    end = start + page_size
-    return mock_history[start:end]
-    
-
 # 模拟SSE事件流
 async def event_generator(chat_id: UUID, user_message_id: UUID, assistant_message_id: UUID):
     # 先发送工具调用事件
@@ -230,55 +209,68 @@ async def event_generator(chat_id: UUID, user_message_id: UUID, assistant_messag
         )
         await asyncio.sleep(.05)
 
-# 处理用户消息并返回SSE事件流
-@router.post("/completions")
-async def message_stream(payload: MessagePayload):
-    current_timestamp = int(time.time())
-    new_chat = True
-    new_user_message = ChatMessage(
-            parentId=None,
-            id=(user_message_id := uuid.uuid4()),
-            role="user",
-            content=payload.content,
+class MockChatService(BaseChatService):
+    """聊天服务Mock实现"""
+
+    async def get_chat(self, chat_id: str):
+        chat = [history for history in mock_history if str(history.id) == chat_id]
+        if not chat:
+            return {}
+        return chat[0]
+
+    async def get_history(self, page: int = 1):
+        page_size = 3  # 让分页更加明显
+        start = (page - 1) * page_size
+        end = start + page_size
+        return mock_history[start:end]
+
+    async def message_stream(self, payload: MessagePayload) -> EventSourceResponse:
+        current_timestamp = int(time.time())
+        new_chat = True
+        new_user_message = ChatMessage(
+                parentId=None,
+                id=(user_message_id := uuid.uuid4()),
+                role="user",
+                content=payload.content,
+                timestamp=current_timestamp
+            )
+
+        new_assistant_message = ChatMessage(
+            parentId=user_message_id,
+            id=(assistant_message_id := uuid.uuid4()),
+            role="assistant",
+            content=mock_answer,
+            tooluse=mock_tooluse,
             timestamp=current_timestamp
         )
+        
+        chat_id = uuid.uuid4()
+        for history in mock_history:
+            if payload.chatId and str(history.id) == payload.chatId:
+                for chat in history.chat.messages:
+                    if str(chat.id) == payload.parentId:
+                        new_user_message.parentId = chat.id
+                        break
+                new_chat = False
+                chat_id = history.id
+                history.chat.messages = history.chat.messages + [new_user_message]
+                history.updated_at = current_timestamp
+                history_item = history
 
-    new_assistant_message = ChatMessage(
-        parentId=user_message_id,
-        id=(assistant_message_id := uuid.uuid4()),
-        role="assistant",
-        content=mock_answer,
-        tooluse=mock_tooluse,
-        timestamp=current_timestamp
-    )
-    
-    chat_id = uuid.uuid4()
-    for history in mock_history:
-        if payload.chatId and str(history.id) == payload.chatId:
-            for chat in history.chat.messages:
-                if str(chat.id) == payload.parentId:
-                    new_user_message.parentId = chat.id
-                    break
-            new_chat = False
-            chat_id = history.id
-            history.chat.messages = history.chat.messages + [new_user_message]
-            history.updated_at = current_timestamp
-            history_item = history
+        if new_chat:
+            history_item = ChatHistory(
+                id=chat_id,
+                title="定态薛定谔方程和量子谐振子",
+                chat=ChatDetail(messages=[new_user_message]),
+                updated_at=current_timestamp,
+                created_at=current_timestamp
+            )
+            mock_history.insert(0, history_item)
+        async def update_chat_history():
+            nonlocal history_item
+            nonlocal new_assistant_message
+            await asyncio.sleep(14)
+            history_item.chat.messages = history_item.chat.messages + [new_assistant_message]
 
-    if new_chat:
-        history_item = ChatHistory(
-            id=chat_id,
-            title="定态薛定谔方程和量子谐振子",
-            chat=ChatDetail(messages=[new_user_message]),
-            updated_at=current_timestamp,
-            created_at=current_timestamp
-        )
-        mock_history.insert(0, history_item)
-    async def update_chat_history():
-        nonlocal history_item
-        nonlocal new_assistant_message
-        await asyncio.sleep(14)
-        history_item.chat.messages = history_item.chat.messages + [new_assistant_message]
-
-    asyncio.create_task(update_chat_history())
-    return EventSourceResponse(event_generator(chat_id, user_message_id, assistant_message_id))
+        asyncio.create_task(update_chat_history())
+        return EventSourceResponse(event_generator(chat_id, user_message_id, assistant_message_id))

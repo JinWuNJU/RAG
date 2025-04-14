@@ -1,14 +1,12 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi_jwt_auth2.exceptions import AuthJWTException
 
-from service.ai.chat import chat
-from fastapi.middleware.cors import CORSMiddleware
-
-from service.file import file_router
-from service.user import user_router
-from service.knowledge_base import knowledge_base_router
-from fastapi import FastAPI
+from service.ai import chat
 from service.evaluation import router as evaluation_router
-
+from service.file import file_router
+from service.knowledge_base import knowledge_base_router
+from service.user import user_router
 from service.user.user_router import authjwt_exception_handler
 
 app = FastAPI()

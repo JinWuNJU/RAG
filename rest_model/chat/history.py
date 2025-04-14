@@ -2,8 +2,10 @@ from typing import List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
+
 from rest_model.chat.sse import ToolEvent
-    
+
+
 class ChatMessage(BaseModel):
     """聊天消息模型"""
     parentId: Optional[UUID]
@@ -14,11 +16,11 @@ class ChatMessage(BaseModel):
     timestamp: int
 
 class ChatDetail(BaseModel):
-    """聊天记录模型"""
+    """单条聊天历史的对话详情"""
     messages: List[ChatMessage] = Field(..., description="聊天消息列表")
 
 class ChatHistory(BaseModel):
-    """完整的聊天历史模型"""
+    """聊天历史列表项"""
     id: UUID
     title: str
     chat: ChatDetail

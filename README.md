@@ -79,7 +79,7 @@ DB_NAME=数据库名称 (例如: RAG)
 DB_USER=数据库用户名 (例如: postgres)
 DB_PASS=数据库密码
 
-MOCKING_CHAT=true or false # 是否使用mock的聊天llm效果
+MOCKING_CHAT=true or false # 是否使用模拟llm聊天服务，默认true
 VOLCENGINE_API_KEY=火山引擎API KEY
 ZHIPU_API_KEY=智谱AI API KEY
 ```
