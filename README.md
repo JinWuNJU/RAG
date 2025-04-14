@@ -5,7 +5,7 @@
 
 ## 项目结构
 
-- `server.py` - FastAPI Mock后端服务器
+- `server.py` - FastAPI 后端服务器
 - `docker-compose.yaml` - PostgreSQL 容器配置，包含:
   - PostgreSQL 17
   - pgroonga
@@ -81,5 +81,6 @@ DB_PASS=数据库密码
 
 MOCKING_CHAT=true or false # 是否使用模拟llm聊天服务，默认true
 VOLCENGINE_API_KEY=火山引擎API KEY
+VOLCENENGINE_API_ENDPOINT=火山引擎API ENDPOINT
 ZHIPU_API_KEY=智谱AI API KEY
 ```

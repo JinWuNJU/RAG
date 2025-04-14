@@ -7,3 +7,4 @@ from . import user
 from . import file
 from . import knowledge_base
 from . import evaluation
+from . import chat
