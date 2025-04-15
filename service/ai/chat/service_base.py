@@ -2,6 +2,7 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import List
 
+from fastapi import BackgroundTasks
 from sse_starlette import EventSourceResponse
 
 from rest_model.chat.completions import MessagePayload
@@ -34,7 +35,7 @@ class BaseChatService(ABC):
         pass
     
     @abstractmethod
-    async def message_stream(self, user_id: uuid.UUID, payload: MessagePayload) -> EventSourceResponse:
+    async def message_stream(self, user_id: uuid.UUID, payload: MessagePayload, background_tasks: BackgroundTasks) -> EventSourceResponse:
         """处理用户消息并返回SSE事件流
         Args:
             payload: 用户消息负载

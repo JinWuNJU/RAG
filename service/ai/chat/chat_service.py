@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import List
 
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 from fastapi.logger import logger
 from pydantic_ai import Agent
 from pydantic_ai.messages import (
@@ -26,7 +26,7 @@ from sse_starlette import EventSourceResponse
 from database import get_db_with
 from database.model.chat import ChatHistoryDB, ChatMessageDB
 from rest_model.chat.completions import MessagePayload
-from rest_model.chat.history import ChatHistory, ChatToolCallPart, ChatToolReturnPart
+from rest_model.chat.history import ChatDetail, ChatHistory, ChatToolCallPart, ChatToolReturnPart
 from rest_model.chat.sse import ChatBeginEvent, ChatEvent, SseEventPackage, ToolCallEvent, ToolReturnEvent
 from service.ai.chat.service_base import BaseChatService
 from dataclasses import dataclass, field
@@ -56,7 +56,7 @@ TitleLLM_Config = LLM_Config(
     model_id=os.environ.get("TITLE_LLM_MODEL_ID", "glm-4-flash-250414"),
     api_key=os.environ.get("TITLE_LLM_API_KEY"),
     endpoint=os.environ.get("TITLE_LLM_API_ENDPOINT", "https://open.bigmodel.cn/api/paas/v4/"),
-    system_prompt_fn=lambda: '''根据用户提问内容及助手的回答内容，生成对话标题。标题应简洁明了，能够准确概括对话的主题和内容。你的回答仅包含标题本身。标题不超过10个字。'''
+    system_prompt_fn=lambda: '''根据用户提问内容及助手的回答内容，生成对话标题。标题应简洁明了，能够准确概括对话的主题和内容。你的回答仅包含标题本身。标题不超过20个字。'''
 )
 
 @dataclass
@@ -87,20 +87,27 @@ class ChatService(BaseChatService):
         )
         self.HISTORY_PAGE_SIZE = 20
 
-        # title_model = OpenAIModel(TitleLLM_Config.model_id,
-        #                                 provider=OpenAIProvider(
-        #                                 api_key=TitleLLM_Config.api_key, 
-        #                                 base_url=TitleLLM_Config.endpoint))
-        # self.title_agent = Agent[None, str](
-        #     title_model,
-        #     result_type=str,
-        #     system_prompt=TitleLLM_Config.system_prompt(),
-        # )
+        title_model = OpenAIModel(TitleLLM_Config.model_id,
+                                        provider=OpenAIProvider(
+                                        api_key=TitleLLM_Config.api_key, 
+                                        base_url=TitleLLM_Config.endpoint))
+        self.title_agent = Agent[None, str](
+            title_model,
+            result_type=str,
+            system_prompt=TitleLLM_Config.system_prompt(),
+        )
     
     async def get_chat(self, user_id: uuid.UUID, chat_id: str):
-        raise NotImplementedError("get_chat method not implemented")
+        with get_db_with() as db:
+            chat_history: ChatHistoryDB | None = db.query(ChatHistoryDB).get(chat_id)
+            if chat_history is None:
+                raise HTTPException(status_code=404, detail="对话不存在")
+            if chat_history.user_id != user_id:
+                raise HTTPException(status_code=403, detail="没有权限访问该对话")
+            chat_detail = ChatDetail.from_orm(chat_history)
+            return chat_detail
     
-    async def get_history(self, user_id: uuid.UUID, page: int = 1):
+    async def get_history(self, user_id: uuid.UUID, page: int = 1) -> List[ChatHistory]:
         with get_db_with() as db:
             chat_history = (
                 db.query(ChatHistoryDB)
@@ -141,20 +148,46 @@ class ChatService(BaseChatService):
                 )
             ]
         )
+    
+    async def _generate_chat_title(self, chat_id: uuid.UUID, user_query: str, assistant_answer: str):
+        """
+        生成聊天标题
+        参数:
+            user_query: 用户提问内容
+            assistant_answer: 助手回答内容
+        返回:
+            生成的标题
+        """
+        user_prompt = f'''用户提问：```{user_query}```
+助手回答：```{assistant_answer}```
+        '''
+        title = await self.title_agent.run(user_prompt=user_prompt)
+        if (title := title.data.strip()) == "":
+            return
+        with get_db_with() as db:
+            chat_history: ChatHistoryDB | None = db.query(ChatHistoryDB).get(chat_id)
+            if chat_history is None:
+                return
+            chat_history.title = title
+            db.commit()
         
     async def _generate_message_stream(self, 
                                        payload: MessagePayload, 
                                        history_id: uuid.UUID,
                                        user_message_id: uuid.UUID,
-                                       chat_trace_list: deque[ModelMessage]
+                                       chat_trace_list: deque[ModelMessage],
+                                       generate_title: bool,
+                                       background_tasks: BackgroundTasks
                                        ):
         """
         异步生成消息流，用于处理聊天消息的生成和工具调用。
         参数:
-            payload (MessagePayload): 包含用户提问内容的有效载荷。
-            history_id (uuid.UUID): 对话所属的ChatHistoryDB对象的id。
-            user_message_id (uuid.UUID): 新创建的用户消息的id。
-            chat_trace_list (deque[ModelMessage]): 多轮对话的历史记录队列。
+            payload: 用户消息负载
+            history_id: 聊天记录ID
+            user_message_id: 用户消息ID
+            chat_trace_list: 聊天记录列表
+            generate_title: 是否生成标题
+            background_tasks: fastapi后台任务
         """
         assistant_message_id=uuid.uuid4()
         yield SseEventPackage(
@@ -213,10 +246,28 @@ class ChatService(BaseChatService):
                 elif Agent.is_end_node(node):
                     pass
             if (result := run.result) is not None:
+                new_messages = result.new_messages()
+                # 生成标题
+                if generate_title:
+                    user_query = ""
+                    assistant_answer = ""
+                    for msg in new_messages:
+                        for part in msg.parts:
+                            if part.part_kind == "user-prompt":
+                                user_query += str(part.content)
+                            elif part.part_kind == "text":
+                                assistant_answer += part.content
+                    background_tasks.add_task(
+                        self._generate_chat_title,
+                        chat_id=history_id,
+                        user_query=user_query,
+                        assistant_answer=assistant_answer
+                    )
+                # 向数据库中存储ai助手的回答
                 # 排除user prompt和system prompt，因为相关信息在请求ai之前已经在message_stream中添加到数据库了
                 filtered_answer_output = filter(
                     lambda x: not any(p.part_kind == 'user-prompt' or p.part_kind == 'system-prompt' for p in x.parts),
-                    result.new_messages()
+                    new_messages
                 )
                 with get_db_with() as db:
                     db.add(ChatMessageDB(
@@ -230,8 +281,9 @@ class ChatService(BaseChatService):
             else:
                 logger.warning("Agent: query %s returned None", payload.content)
 
-    async def message_stream(self, user_id: uuid.UUID, payload: MessagePayload):
+    async def message_stream(self, user_id: uuid.UUID, payload: MessagePayload, background_tasks: BackgroundTasks) -> EventSourceResponse:
         with get_db_with() as db:
+            is_create_new_chat = False
             history_item = None
             parent_message = None
             chat_trace_list: deque[ModelMessage] = deque()
@@ -240,6 +292,7 @@ class ChatService(BaseChatService):
                 history_item: ChatHistoryDB | None = db.query(ChatHistoryDB).get(payload.chatId)
             if history_item is None:
                 # 新建对话，当提供了chatId，但没有找到对应的history_item，或者没有提供chatId
+                is_create_new_chat = True
                 history_item = ChatHistoryDB(
                     id=uuid.uuid4(),
                     title=payload.content[:10],
@@ -310,5 +363,7 @@ class ChatService(BaseChatService):
             payload=payload, 
             history_id=history_id,
             user_message_id=user_message_id,
-            chat_trace_list=chat_trace_list
+            chat_trace_list=chat_trace_list,
+            generate_title=is_create_new_chat,
+            background_tasks=background_tasks
         ))

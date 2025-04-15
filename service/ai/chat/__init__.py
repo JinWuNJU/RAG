@@ -1,7 +1,6 @@
 import os
 
-from fastapi import APIRouter
-from fastapi import Depends
+from fastapi import APIRouter, Depends, BackgroundTasks
 from fastapi_jwt_auth2 import AuthJWT
 
 from rest_model.chat.completions import MessagePayload
@@ -35,7 +34,7 @@ async def get_history(page: int = 1, Authorize: AuthJWT = Depends()):
     return await chat_service.get_history(user_id, page)
 
 @router.post("/completions")
-async def message_stream(payload: MessagePayload, Authorize: AuthJWT = Depends()):
+async def message_stream(payload: MessagePayload, background_tasks: BackgroundTasks, Authorize: AuthJWT = Depends()):
     """处理用户消息并返回SSE事件流"""
     user_id = auth.decode_jwt_to_uid(Authorize)
-    return await chat_service.message_stream(user_id, payload)
+    return await chat_service.message_stream(user_id, payload, background_tasks)

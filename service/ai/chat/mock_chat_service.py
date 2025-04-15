@@ -4,6 +4,7 @@ import uuid
 from typing import List
 from uuid import UUID
 
+from fastapi import BackgroundTasks
 from sse_starlette import EventSourceResponse
 
 from rest_model.chat.completions import MessagePayload
@@ -243,7 +244,7 @@ class MockChatService(BaseChatService):
         end = start + page_size
         return [ChatHistory(**v.model_dump()) for v in mock_history[start:end]]
 
-    async def message_stream(self, user_id: uuid.UUID, payload: MessagePayload) -> EventSourceResponse:
+    async def message_stream(self, user_id: uuid.UUID, payload: MessagePayload, background_tasks: BackgroundTasks) -> EventSourceResponse:
         current_timestamp = int(time.time())
         new_chat = True
         new_user_message = ChatMessage(
