@@ -1,4 +1,5 @@
 import os
+
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -38,4 +39,14 @@ def get_db():
     try:
         yield db
     finally:
-        db.close() 
+        db.close()
+
+from contextlib import contextmanager
+
+@contextmanager
+def get_db_with():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

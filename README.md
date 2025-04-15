@@ -71,7 +71,7 @@
 
 ## 环境变量说明
 ```.env
-POSTGRES_PASSWORD=容器数据库密码
+POSTGRES_PASSWORD=容器内部署的数据库的密码
 
 DB_HOST=数据库主机地址 (例如: 127.0.0.1)
 DB_PORT=数据库端口号 (例如: 5432)
@@ -80,11 +80,17 @@ DB_USER=数据库用户名 (例如: postgres)
 DB_PASS=数据库密码
 
 MOCKING_CHAT=true or false # 是否使用模拟llm聊天服务，默认true
+MOCKING_CHAT_LEGACY=true or false # 是否使用模拟服务的旧版本，默认true（新版本模拟了实际llm聊天的api，与现有前端所用接口不同）
+
 
 # rag对话功能依赖
-CHAT_LLM_MODEL_ID=聊天模型ID
-VOLCENGINE_API_KEY=火山引擎API KEY
-VOLCENENGINE_API_ENDPOINT=火山引擎API ENDPOINT
+CHAT_LLM_MODEL_ID=用于RAG对话的模型ID
+CHAT_LLM_API_KEY=用于RAG对话的API KEY
+CHAT_LLM_API_ENDPOINT=用于RAG对话的API ENDPOINT
+TITLE_LLM_MODEL_ID=用于生成对话标题的模型ID
+TITLE_LLM_API_KEY=用于生成对话标题的API KEY
+TITLE_LLM_API_ENDPOINT=用于生成对话标题的API ENDPOINT
+
 
 ZHIPU_API_KEY=智谱AI API KEY
 ```

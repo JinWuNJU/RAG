@@ -1,17 +1,88 @@
 import asyncio
 import time
 import uuid
-from typing import List
+from typing import Annotated, List, Literal, Optional
 from uuid import UUID
 
+from fastapi_jwt_auth2 import AuthJWT
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 from sse_starlette import EventSourceResponse
 
 from rest_model.chat.completions import MessagePayload
-from rest_model.chat.history import ChatDetail, ChatDialog, ChatHistory, ChatMessage, ChatMessagePart, ChatTextPart, \
-    ChatToolCallPart, ChatToolReturnPart
-from rest_model.chat.sse import ChatBeginEvent, ChatEvent, SseEventPackage, \
-    ToolCallEvent, ToolReturnEvent
-from rest_model.chat.toolcalls import RetrieveToolReturn, RetrievedDocument, RetrieveParams
+
+class BaseEvent(BaseModel):
+    """基础事件模型"""
+    type: str = Field(..., description="事件类型")
+
+class RetrieveParams(BaseModel):
+    """检索工具的参数"""
+    knowledge_base: str = Field(..., description="知识库名称")
+    keyword: str = Field(..., description="检索关键词")
+
+class Document(BaseModel):
+    """检索到的文档信息"""
+    snippet: str = Field(..., description="文档片段")
+    url: str = Field(..., description="文档链接")
+
+class ToolCallEvent(BaseEvent):
+    """工具调用事件"""
+    type: Annotated[str, Literal["call"]] = "call"
+    name: str = Field(..., description="工具名称")
+    params: RetrieveParams | str | dict = Field(..., description="工具参数")
+    description: str = Field(..., description="调用描述")
+
+class DocReturnEvent(BaseEvent):
+    """返回文档事件"""
+    type: Annotated[str, Literal["doc"]] = "doc"
+    count: int = Field(..., description="文档数量")
+    documents: List[Document] = Field(..., description="文档列表")
+
+class ChatEvent(BaseEvent):
+    """聊天事件"""
+    type: Annotated[str, Literal["chat"]] = "chat"
+    content: str = Field(..., description="聊天内容")
+
+class ChatBeginEvent(BaseEvent):
+    """SSE开始事件"""
+    type: Annotated[str, Literal["begin"]] = "begin"
+    chat_id: UUID
+    user_message_id: UUID
+    assistant_message_id: UUID
+
+
+ToolEvent = ToolCallEvent | DocReturnEvent
+SseEvent = ToolEvent | ChatEvent | ChatBeginEvent
+
+def SseEventPackage(event: SseEvent) -> dict:
+    return {
+        "event": event.type,
+        "data": event.model_dump_json()
+    }
+
+class ChatMessage(BaseModel):
+    """聊天消息模型"""
+    parentId: Optional[UUID]
+    id: UUID
+    role: str
+    content: str
+    tooluse: Optional[List[ToolEvent]] = None
+    timestamp: int
+
+class ChatDetail(BaseModel):
+    """单条聊天历史的对话详情"""
+    messages: List[ChatMessage] = Field(..., description="聊天消息列表")
+
+class ChatHistory(BaseModel):
+    """聊天历史列表项"""
+    id: UUID
+    title: str
+    chat: ChatDetail
+    updated_at: int
+    created_at: int
+
+
+
 from service.ai.chat.service_base import BaseChatService
 
 # Mock数据说明：
@@ -115,54 +186,50 @@ plt.show()
 
 
 # 工具调用过程 - 包含检索和文档返回两个阶段
-mock_tooluse: List[ChatMessagePart] = [
-    ChatToolCallPart(
-        tool_name="retrieve",
-        args=RetrieveParams(
-            knowledge_base="物理知识库",
-            keyword="定态薛定谔方程"
-        ).model_dump()
+mock_tooluse: List[ToolEvent] = [
+    ToolCallEvent(
+        type="call",
+        name="retrieve",
+        params=RetrieveParams(
+            knowledge_base="physics_textbook",
+            keyword="定态薛定谔方程 量子谐振子"
+        ),
+        description="正在检索定态薛定谔方程和量子谐振子相关内容"
     ),
-    ChatToolReturnPart(
-        tool_name="retrieve",
-        content=RetrieveToolReturn(
-            count=10,
-            documents=[
-                RetrievedDocument(
-                    snippet="定态薛定谔方程为...",
-                    url="http://example.com"
-                ) for _ in range(10)
-            ]
-        ).model_dump()
+    DocReturnEvent(
+        type="doc",
+        count=10,
+        documents=[
+            Document(
+                snippet="定态薛定谔方程为...",
+                url="http://example.com"
+            ) for _ in range(10)
+        ]
     )
 ]
 
 mock_history_counter = 0
 # 模拟对话历史 - 包含多轮对话和追问场景
-mock_history: List[ChatDetail] = [
-    ChatDetail(
+mock_history: List[ChatHistory] = [
+    ChatHistory(
         id=uuid.uuid4(),
         title=f"{(mock_history_counter:= mock_history_counter + 1)} 定态薛定谔方程和量子谐振子",
-        chat=ChatDialog(
+        chat=ChatDetail(
             messages= [
                 # 初始对话
                 ChatMessage(
                     parentId=None,
                     id=(root_id := uuid.uuid4()),
                     role="user",
-                    part=[
-                        ChatTextPart(content=mock_query),
-                    ],
+                    content=mock_query,
                     timestamp=174257095
                 ),
                 ChatMessage(
                     parentId=root_id,
                     id=(answer_id_1 := uuid.uuid4()),
                     role="assistant",
-                    part=[
-                        *mock_tooluse,
-                        ChatTextPart(content=mock_answer)
-                    ],
+                    content=mock_answer,
+                    tooluse=mock_tooluse,
                     timestamp=174257099
                 ),
                 # 第二轮对话
@@ -170,19 +237,15 @@ mock_history: List[ChatDetail] = [
                     parentId=None,
                     id=(root_id_2 := uuid.uuid4()),
                     role="user",
-                    part=[
-                        ChatTextPart(content=mock_query + " （编辑后的版本二查询）"),
-                    ],
+                    content=mock_query + " （编辑后的版本二查询）",
                     timestamp=174257120
                 ),
                 ChatMessage(
                     parentId=root_id_2,
                     id=uuid.uuid4(),
                     role="assistant",
-                    part=[
-                        *mock_tooluse,
-                        ChatTextPart(content=mock_answer + " （编辑后的版本二回答）"),
-                    ],
+                    content=mock_answer + " （编辑后的版本二回答）",
+                    tooluse=mock_tooluse,
                     timestamp=174257130
                 )
             ]
@@ -203,21 +266,12 @@ async def event_generator(chat_id: UUID, user_message_id: UUID, assistant_messag
             assistant_message_id=assistant_message_id
         )
     )
-    yield SseEventPackage(
-        ToolCallEvent(
-            data=ChatToolCallPart(
-                **mock_tooluse[0].model_dump()
-            )
+    for tool in mock_tooluse:
+        yield SseEventPackage(
+            tool
         )
-    )
-    await asyncio.sleep(.5) # 模拟延迟
-    yield SseEventPackage(
-        ToolReturnEvent(
-            data=ChatToolReturnPart(
-                **mock_tooluse[1].model_dump()
-            )
-        )
-    )
+        await asyncio.sleep(.1) # 模拟延迟
+    
     # 分段发送回答内容
     for i in range(0, len(mock_answer), 8):
         chunk = mock_answer[i:i+8]
@@ -228,31 +282,29 @@ async def event_generator(chat_id: UUID, user_message_id: UUID, assistant_messag
         )
         await asyncio.sleep(.05)
 
-class MockChatService(BaseChatService):
+class MockChatServiceLegacy(BaseChatService):
     """聊天服务Mock实现"""
 
-    async def get_chat(self, user_id:uuid.UUID, chat_id: str):
+    async def get_chat(self, user_id: uuid.UUID, chat_id: str): # type: ignore
         chat = [history for history in mock_history if str(history.id) == chat_id]
         if not chat:
             return {}
         return chat[0]
 
-    async def get_history(self, user_id: uuid.UUID, page: int = 1):
+    async def get_history(self, user_id: uuid.UUID, page: int = 1): # type: ignore
         page_size = 3  # 让分页更加明显
         start = (page - 1) * page_size
         end = start + page_size
-        return [ChatHistory(**v.model_dump()) for v in mock_history[start:end]]
+        return mock_history[start:end]
 
-    async def message_stream(self, user_id: uuid.UUID, payload: MessagePayload) -> EventSourceResponse:
+    async def message_stream(self, user_id: uuid.UUID, payload: MessagePayload) -> EventSourceResponse: # type: ignore
         current_timestamp = int(time.time())
         new_chat = True
         new_user_message = ChatMessage(
                 parentId=None,
                 id=(user_message_id := uuid.uuid4()),
                 role="user",
-                part=[
-                    ChatTextPart(content=payload.content),
-                ],
+                content=payload.content,
                 timestamp=current_timestamp
             )
 
@@ -260,10 +312,8 @@ class MockChatService(BaseChatService):
             parentId=user_message_id,
             id=(assistant_message_id := uuid.uuid4()),
             role="assistant",
-            part=[
-                *mock_tooluse,
-                ChatTextPart(content=mock_answer),
-            ],
+            content=mock_answer,
+            tooluse=mock_tooluse,
             timestamp=current_timestamp
         )
         
@@ -281,10 +331,10 @@ class MockChatService(BaseChatService):
                 history_item = history
 
         if new_chat:
-            history_item = ChatDetail(
+            history_item = ChatHistory(
                 id=chat_id,
                 title="定态薛定谔方程和量子谐振子",
-                chat=ChatDialog(messages=[new_user_message]),
+                chat=ChatDetail(messages=[new_user_message]),
                 updated_at=current_timestamp,
                 created_at=current_timestamp
             )

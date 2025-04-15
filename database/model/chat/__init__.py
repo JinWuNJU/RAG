@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
 from pydantic_core import to_jsonable_python
-from sqlalchemy import ForeignKey, Index, String, TIMESTAMP, TypeDecorator, func
+from sqlalchemy import ForeignKey, Index, String, TIMESTAMP, TypeDecorator, asc, func
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -56,7 +56,7 @@ class ChatHistoryDB(Base):
     updated_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now())
     
-    chat: Mapped[List["ChatMessageDB"]] = relationship("ChatMessageDB", back_populates="chat_history")
+    chat: Mapped[List["ChatMessageDB"]] = relationship("ChatMessageDB", back_populates="chat_history", order_by=asc("ChatMessageDB.timestamp"))
     
     __table_args__ = (
         Index("idx_chat_histories_updated_at", "updated_at"),
