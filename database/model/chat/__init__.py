@@ -56,7 +56,7 @@ class ChatHistoryDB(Base):
     updated_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now())
     
-    chat: Mapped[List["ChatMessageDB"]] = relationship("ChatMessageDB", back_populates="chat_history", order_by=asc("ChatMessageDB.timestamp"))
+    chat: Mapped[List["ChatMessageDB"]] = relationship("ChatMessageDB", back_populates="chat_history", order_by=ChatMessageDB.timestamp.asc())
     
     __table_args__ = (
         Index("idx_chat_histories_updated_at", "updated_at"),

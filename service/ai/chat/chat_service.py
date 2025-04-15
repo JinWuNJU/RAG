@@ -146,9 +146,7 @@ class ChatService(BaseChatService):
                                        payload: MessagePayload, 
                                        history_id: uuid.UUID,
                                        user_message_id: uuid.UUID,
-                                       chat_trace_list: deque[ModelMessage],
-                                       history_item: ChatHistoryDB,
-                                       parent_message: ChatMessageDB | None = None
+                                       chat_trace_list: deque[ModelMessage]
                                        ):
         """
         异步生成消息流，用于处理聊天消息的生成和工具调用。
@@ -157,8 +155,6 @@ class ChatService(BaseChatService):
             history_id (uuid.UUID): 对话所属的ChatHistoryDB对象的id。
             user_message_id (uuid.UUID): 新创建的用户消息的id。
             chat_trace_list (deque[ModelMessage]): 多轮对话的历史记录队列。
-            history_item (ChatHistoryDB): 聊天历史数据库orm。
-            parent_message (ChatMessageDB | None): 父消息对象，当创建新root message时不传递。·
         """
         assistant_message_id=uuid.uuid4()
         yield SseEventPackage(
@@ -227,19 +223,19 @@ class ChatService(BaseChatService):
                         id=assistant_message_id,
                         role="assistant",
                         part=list(filtered_answer_output),
-                        chat_history=history_item,
-                        parent=parent_message
+                        chat_id=history_id,
+                        parent_id=user_message_id,
                     ))
                     db.commit()
-                    db.refresh(history_item)
             else:
                 logger.warning("Agent: query %s returned None", payload.content)
 
     async def message_stream(self, user_id: uuid.UUID, payload: MessagePayload):
-        history_item = None
-        parent_message = None
-        chat_trace_list: deque[ModelMessage] = deque()
         with get_db_with() as db:
+            history_item = None
+            parent_message = None
+            chat_trace_list: deque[ModelMessage] = deque()
+
             if payload.chatId is not None:
                 history_item: ChatHistoryDB | None = db.query(ChatHistoryDB).get(payload.chatId)
             if history_item is None:
@@ -306,12 +302,13 @@ class ChatService(BaseChatService):
                     db.add(user_message)
                     history_item.updated_at = datetime.now(tz=timezone.utc)
                     db.commit()
+            # 记录id来提供给聊天sse流
+            history_id = history_item.id
+            user_message_id = user_message.id
             
-            return EventSourceResponse(self._generate_message_stream(
-                payload=payload, 
-                history_id=history_item.id,
-                user_message_id=user_message.id,
-                chat_trace_list=chat_trace_list,
-                history_item=history_item,
-                parent_message=user_message,
-            ))
+        return EventSourceResponse(self._generate_message_stream(
+            payload=payload, 
+            history_id=history_id,
+            user_message_id=user_message_id,
+            chat_trace_list=chat_trace_list
+        ))
