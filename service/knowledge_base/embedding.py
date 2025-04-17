@@ -1,7 +1,7 @@
 import os
 from typing import List, Optional
 import numpy as np
-from volcenginesdkarkruntime import Ark
+from openai import OpenAI
 from loguru import logger
 
 
@@ -10,8 +10,8 @@ class EmbeddingService:
         """
         初始化ARK嵌入服务，输出维度调整为1536
         """
-        self.client = Ark(api_key=os.environ.get("ARK_API_KEY"))
-        self.model_name = os.environ.get("ARK_EMBEDDING_MODEL")  # 原始模型输出2048维
+        self.client = OpenAI(api_key=os.environ.get("ARK_API_KEY"), base_url=os.environ.get("ARK_BASE_URL"))
+        self.model_name = os.environ.get("ARK_EMBEDDING_MODEL", "")  # 原始模型输出2048维
         self.target_dim = 1536  # 目标维度
         logger.info(f"初始化ARK嵌入服务，模型: {self.model_name}，目标维度: {self.target_dim}")
 
