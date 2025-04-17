@@ -10,8 +10,8 @@ class EmbeddingService:
         """
         初始化ARK嵌入服务，输出维度调整为1536
         """
-        self.client = OpenAI(api_key=os.environ.get("ARK_API_KEY"), base_url=os.environ.get("ARK_BASE_URL"))
-        self.model_name = os.environ.get("ARK_EMBEDDING_MODEL", "")  # 原始模型输出2048维
+        self.client = OpenAI(api_key=os.environ.get("EMB_API_KEY"), base_url=os.environ.get("EMB_API_ENDPOINT"))
+        self.model_name = os.environ.get("EMB_MODEL_ID", "")  # 原始模型输出2048维
         self.target_dim = 1536  # 目标维度
         logger.info(f"初始化ARK嵌入服务，模型: {self.model_name}，目标维度: {self.target_dim}")
 
@@ -26,7 +26,6 @@ class EmbeddingService:
         """
         生成1536维的嵌入向量
         :param text: 输入文本
-        :param is_query: 是否为查询文本（需要添加instruction）
         :return: 1536维的numpy数组
         """
         if not text.strip():
