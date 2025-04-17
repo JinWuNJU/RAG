@@ -63,10 +63,10 @@ class KnowledgeBaseChunk(Base):
         
         # PGroonga full-text search index
         Index('pgroonga_content_index', content, postgresql_using='pgroonga'),
-        
-        # pgvector index using IVFFlat algorithm
-        Index('ivfflat_embedding_index', embedding, postgresql_using='ivfflat', 
-              postgresql_with={'lists': 100}, postgresql_ops={'embedding': 'vector_l2_ops'}),
+
+        # 使用余弦相似度
+        Index('ivfflat_embedding_index', embedding, postgresql_using='ivfflat',
+              postgresql_with={'lists': 100}, postgresql_ops={'embedding': 'vector_cosine_ops'})
     )
 
 

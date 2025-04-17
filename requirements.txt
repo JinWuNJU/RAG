@@ -18,3 +18,7 @@ langchain-community~=0.3.20
 pydantic-settings~=2.8.1
 loguru==0.7.2
 pydantic-ai[mcp]==0.0.46
+pydantic_core~=2.27.2
+datasets~=3.5.0
+tenacity~=9.0.0
+numpy~=2.2.4

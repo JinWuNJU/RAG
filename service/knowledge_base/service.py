@@ -1,5 +1,7 @@
+import asyncio
 from typing import List
 
+import numpy as np
 from loguru import logger
 from sqlalchemy.orm import Session
 import re
@@ -8,9 +10,13 @@ from database.model.file import FileDB
 from database.model.knowledge_base import *
 from uuid import UUID
 
+from service.knowledge_base.embedding import EmbeddingService
+
+
 class TextFileProcessor:
     def __init__(self, db: Session):
         self.db = db
+        self.embedding_service = EmbeddingService()
 
     async def process_files(self, kb_id: UUID, file_ids: List[UUID]):
         """处理一批文本文件"""
@@ -71,9 +77,26 @@ class TextFileProcessor:
             overlap_size=kb.overlap_size
         )
 
-        # 4. 保存分块
-        self._save_chunks(kb.id, file_id, file_record.filename, chunks)
+        # 4. 生成嵌入向量
+        embeddings = await self._generate_embeddings(chunks)
+
+        # 5. 保存分块和嵌入向量
+        self._save_chunks_with_embeddings(kb.id, file_id, file_record.filename, chunks, embeddings)
         return True
+
+    async def _generate_embeddings(self, chunks: List[str]) -> List[Optional[np.ndarray]]:
+        """异步生成嵌入向量"""
+        try:
+            # 在实际应用中，这里可以使用批量处理提高效率
+            loop = asyncio.get_event_loop()
+            embeddings = await loop.run_in_executor(
+                None,
+                lambda: self.embedding_service.embed_batch(chunks)
+            )
+            return embeddings
+        except Exception as e:
+            logger.error(f"生成嵌入向量时出错: {str(e)}")
+            return [None] * len(chunks)
 
     def _chunk_text(self, text: str, chunk_size: int, overlap_size: int) -> List[str]:
         """文本分块"""
@@ -138,22 +161,27 @@ class TextFileProcessor:
         overlap_part = last_chunk[-overlap:]
         return new_chunk.startswith(overlap_part) and len(new_chunk) <= overlap * 1.5
 
-    def _save_chunks(self, kb_id: UUID, file_id: UUID, filename: str, chunks: List[str]):
-        """批量保存分块到数据库"""
-        db_chunks = [
-            KnowledgeBaseChunk(
+    def _save_chunks_with_embeddings(self, kb_id: UUID, file_id: UUID, filename: str,
+                                   chunks: List[str], embeddings: List[Optional[np.ndarray]]):
+        """批量保存分块和嵌入向量到数据库"""
+        if len(chunks) != len(embeddings):
+            raise ValueError("分块数量和嵌入向量数量不匹配")
+
+        db_chunks = []
+        for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+            db_chunk = KnowledgeBaseChunk(
                 knowledge_base_id=kb_id,
                 file_id=file_id,
                 chunk_index=i,
                 content=chunk,
-                file_name=filename
+                file_name=filename,
+                embedding=embedding.tolist() if embedding is not None else None
             )
-            for i, chunk in enumerate(chunks)
-        ]
+            db_chunks.append(db_chunk)
 
         self.db.bulk_save_objects(db_chunks)
         self.db.commit()
-        logger.info(f"文件 {filename} 已分块存储: {len(chunks)} 个分块")
+        logger.info(f"文件 {filename} 已分块存储: {len(chunks)} 个分块 (其中 {sum(e is not None for e in embeddings)} 个有嵌入向量)")
 
 
 
