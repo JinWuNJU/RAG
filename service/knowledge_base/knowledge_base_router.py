@@ -1,5 +1,8 @@
+from typing import Tuple, Any, Coroutine, Type
+from rank_bm25 import BM25Okapi
+import jieba
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from jose import JWTError
+from sklearn.preprocessing import MinMaxScaler
 from sqlalchemy import text, exc
 
 from database import get_db
@@ -203,89 +206,143 @@ async def get_knowledge_base_detail(
         )
 
 
-@router.post("/{knowledge_base_id}/search",response_model=List[SearchResult])
-async def search_knowledge_base(
-        knowledge_base_id: UUID,
+def get_text_search_results(db: Session, knowledge_base_id: uuid.UUID, query: str, limit: int):
+    """使用BM25进行全文检索"""
+    # 获取所有分块内容
+    chunks = db.query(KnowledgeBaseChunk).filter(
+        KnowledgeBaseChunk.knowledge_base_id == knowledge_base_id
+    ).all()
+
+    if not chunks:
+        return []
+
+    # 中文分词
+    tokenized_docs = [list(jieba.cut(chunk.content)) for chunk in chunks]
+    tokenized_query = list(jieba.cut(query))
+
+    # 计算BM25分数
+    bm25 = BM25Okapi(tokenized_docs)
+    scores = bm25.get_scores(tokenized_query)
+
+    # 获取分数最高的分块
+    scored_chunks = sorted(
+        zip(chunks, scores),
+        key=lambda x: x[1],
+        reverse=True
+    )[:limit]
+
+    return [(chunk, score) for chunk, score in scored_chunks]
+
+
+def get_vector_search_results(db: Session, knowledge_base_id: uuid.UUID, query: str, limit: int,
+                              embedding_service: EmbeddingService):
+    """使用向量相似度搜索"""
+    # 获取查询的嵌入向量
+    query_embedding = embedding_service.embed_text(query)
+    if query_embedding is None:
+        return []
+
+    # 转换为适合pgvector的格式
+    query_embedding_pg = query_embedding.tolist()
+
+    # 使用pgvector的内置余弦相似度操作符
+    chunks = db.query(
+        KnowledgeBaseChunk,
+        (1 - KnowledgeBaseChunk.embedding.cosine_distance(query_embedding_pg)).label("score")
+    ).filter(
+        KnowledgeBaseChunk.knowledge_base_id == knowledge_base_id,
+        KnowledgeBaseChunk.embedding.isnot(None)
+    ).order_by(
+        KnowledgeBaseChunk.embedding.cosine_distance(query_embedding_pg)
+    ).limit(limit).all()
+
+    return [(chunk, score) for chunk, score in chunks]
+
+
+def normalize_scores(scores: List[float]) -> List[float]:
+    """归一化分数到[0,1]范围"""
+    if not scores:
+        return []
+    scaler = MinMaxScaler()
+    normalized = scaler.fit_transform(np.array(scores).reshape(-1, 1)).flatten()
+    return normalized.tolist()
+
+
+@router.post("/{knowledge_base_id}/search", response_model=List[SearchResult])
+async def hybrid_search(
+        knowledge_base_id: str,
         request: SearchRequest,
         db: Session = Depends(get_db),
-        Authorize: AuthJWT = Depends()
-) -> List[SearchResult]:
-    """
-    搜索知识库内容API
-
-    参数:
-    - knowledge_base_id: 知识库唯一标识
-    - request: 搜索请求体，包含:
-      - query: 搜索关键词
-      - limit: 返回结果数量限制（默认10，最大100）
-
-    返回:
-    - List[SearchResult]: 匹配的文档片段列表
-
-
-
-    错误码:
-    - 400: 搜索关键词为空
-    - 404: 知识库不存在或无匹配结果
-    - 500: 服务器内部错误
-    """
-    user_id = auth.decode_jwt_to_uid(Authorize)
-    kb = db.query(KnowledgeBase).filter(
-        (KnowledgeBase.id == knowledge_base_id) &
-        ((KnowledgeBase.is_public == True) | (KnowledgeBase.uploader_id == user_id))
-    ).first()
-
+        embedding_service: EmbeddingService = Depends(EmbeddingService)
+):
+    """混合搜索API"""
+    # 获取知识库配置
+    kb = db.query(KnowledgeBase).filter(KnowledgeBase.id == knowledge_base_id).first()
     if not kb:
-        raise HTTPException(
-            status_code=404,
-            detail=f"知识库{knowledge_base_id}无法访问或不存在"
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+
+    # 确定混合比例
+    hybrid_ratio = kb.hybrid_ratio
+
+    # 1. 执行文本搜索 (BM25)
+    text_results = get_text_search_results(db, knowledge_base_id, request.query, request.limit)
+    text_chunks, text_scores = zip(*text_results) if text_results else ([], [])
+
+    # 2. 执行向量搜索
+    vector_results = get_vector_search_results(db, knowledge_base_id, request.query, request.limit, embedding_service)
+    vector_chunks, vector_scores = zip(*vector_results) if vector_results else ([], [])
+
+    # 3. 归一化分数
+    text_scores_norm = normalize_scores(text_scores)
+    vector_scores_norm = normalize_scores(vector_scores)
+
+    # 4. 合并结果并计算混合分数
+    all_chunks = {}
+
+    # 添加文本搜索结果
+    for chunk, score in zip(text_chunks, text_scores_norm):
+        if chunk.id not in all_chunks:
+            all_chunks[chunk.id] = {
+                'chunk': chunk,
+                'text_score': score,
+                'vector_score': 0.0  # 默认值
+            }
+
+    # 添加向量搜索结果
+    for chunk, score in zip(vector_chunks, vector_scores_norm):
+        if chunk.id in all_chunks:
+            all_chunks[chunk.id]['vector_score'] = score
+        else:
+            all_chunks[chunk.id] = {
+                'chunk': chunk,
+                'text_score': 0.0,  # 默认值
+                'vector_score': score
+            }
+
+    # 计算混合分数
+    results = []
+    for chunk_data in all_chunks.values():
+        hybrid_score = (hybrid_ratio * chunk_data['text_score'] +
+                        (1 - hybrid_ratio) * chunk_data['vector_score'])
+        results.append({
+            'chunk': chunk_data['chunk'],
+            'score': hybrid_score
+        })
+
+    # 按混合分数排序
+    sorted_results = sorted(results, key=lambda x: x['score'], reverse=True)[:request.limit]
+
+    # 转换为响应模型
+    return [
+        SearchResult(
+            content=result['chunk'].content,
+            file_name=result['chunk'].file_name,
+            file_id=result['chunk'].file_id,
+            chunk_index=result['chunk'].chunk_index,
+            score=result['score']
         )
-
-    # 参数验证
-    if not request.query.strip():
-        raise HTTPException(status_code=400, detail="搜索关键词不能为空")
-
-    # 限制最大返回数量
-    limit = min(request.limit, 100)
-
-    try:
-        # 执行PGroonga全文检索
-        results = db.query(
-            KnowledgeBaseChunk.content,
-            KnowledgeBaseChunk.file_name,
-            KnowledgeBaseChunk.file_id,
-            KnowledgeBaseChunk.chunk_index
-        ).filter(
-            KnowledgeBaseChunk.knowledge_base_id == knowledge_base_id,
-            text(f"knowledge_base_chunks.content &@~ '{request.query}'")
-        ).order_by(
-            text("pgroonga_score(knowledge_base_chunks.tableoid, knowledge_base_chunks.ctid) DESC")
-        ).limit(limit).all()
-
-        if not results:
-            raise HTTPException(
-                status_code=404,
-                detail=f"知识库 {knowledge_base_id} 中未找到匹配内容"
-            )
-
-        return [
-            SearchResult(
-                content=result.content,
-                file_name=result.file_name,
-                file_id=result.file_id,
-                chunk_index=result.chunk_index
-            )
-            for result in results
-        ]
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"搜索失败: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail="服务器内部错误，请稍后再试"
-        )
+        for result in sorted_results
+    ]
 
 # 索引健康检查端点（可选）
 @router.get("/search/status")

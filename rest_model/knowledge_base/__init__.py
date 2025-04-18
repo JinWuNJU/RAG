@@ -66,6 +66,7 @@ class SearchResult(BaseModel):
     file_name: str    # 直接从knowledge_base_chunks表获取
     file_id: UUID
     chunk_index: int
+    score: float
 
     class Config:
         json_encoders = {
