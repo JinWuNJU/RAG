@@ -3,10 +3,8 @@ import time
 import uuid
 from typing import Annotated, List, Literal, Optional
 from uuid import UUID
-
-from fastapi_jwt_auth2 import AuthJWT
+from fastapi import BackgroundTasks
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
 from sse_starlette import EventSourceResponse
 
 from rest_model.chat.completions import MessagePayload
@@ -297,7 +295,7 @@ class MockChatServiceLegacy(BaseChatService):
         end = start + page_size
         return mock_history[start:end]
 
-    async def message_stream(self, user_id: uuid.UUID, payload: MessagePayload, background_tasks: BackgroundTasks,) -> EventSourceResponse: # type: ignore
+    async def message_stream(self, user_id: uuid.UUID, payload: MessagePayload, background_tasks: BackgroundTasks) -> EventSourceResponse: # type: ignore
         current_timestamp = int(time.time())
         new_chat = True
         new_user_message = ChatMessage(
