@@ -207,31 +207,35 @@ async def get_knowledge_base_detail(
 
 
 def get_text_search_results(db: Session, knowledge_base_id: uuid.UUID, query: str, limit: int):
-    """使用BM25进行全文检索"""
-    # 获取所有分块内容
-    chunks = db.query(KnowledgeBaseChunk).filter(
-        KnowledgeBaseChunk.knowledge_base_id == knowledge_base_id
-    ).all()
+    """使用pgroonga进行全文检索"""
+    # 使用原生SQL确保pgroonga函数调用正确
+    sql = """
+    SELECT id, pgroonga_score(tableoid, ctid) AS score
+    FROM knowledge_base_chunks
+    WHERE knowledge_base_id = :kb_id 
+      AND content &@~ :query
+    ORDER BY score DESC
+    LIMIT :limit
+    """
 
-    if not chunks:
+    # 执行查询获取ID和分数
+    results = db.execute(
+        text(sql),
+        {"kb_id": str(knowledge_base_id), "query": query, "limit": limit}
+    ).fetchall()
+
+    if not results:
         return []
 
-    # 中文分词
-    tokenized_docs = [list(jieba.cut(chunk.content)) for chunk in chunks]
-    tokenized_query = list(jieba.cut(query))
+    # 获取完整的分块对象
+    chunk_ids = [r[0] for r in results]
+    chunks = db.query(KnowledgeBaseChunk).filter(
+        KnowledgeBaseChunk.id.in_(chunk_ids)
+    ).all()
 
-    # 计算BM25分数
-    bm25 = BM25Okapi(tokenized_docs)
-    scores = bm25.get_scores(tokenized_query)
-
-    # 获取分数最高的分块
-    scored_chunks = sorted(
-        zip(chunks, scores),
-        key=lambda x: x[1],
-        reverse=True
-    )[:limit]
-
-    return [(chunk, score) for chunk, score in scored_chunks]
+    # 保持原始排序并关联分数
+    chunk_map = {c.id: c for c in chunks}
+    return [(chunk_map[r[0]], float(r[1])) for r in results if r[0] in chunk_map]
 
 
 def get_vector_search_results(db: Session, knowledge_base_id: uuid.UUID, query: str, limit: int,
@@ -259,13 +263,7 @@ def get_vector_search_results(db: Session, knowledge_base_id: uuid.UUID, query: 
     return [(chunk, score) for chunk, score in chunks]
 
 
-def normalize_scores(scores: List[float]) -> List[float]:
-    """归一化分数到[0,1]范围"""
-    if not scores:
-        return []
-    scaler = MinMaxScaler()
-    normalized = scaler.fit_transform(np.array(scores).reshape(-1, 1)).flatten()
-    return normalized.tolist()
+
 
 
 @router.post("/{knowledge_base_id}/search", response_model=List[SearchResult])
@@ -275,74 +273,114 @@ async def hybrid_search(
         db: Session = Depends(get_db),
         embedding_service: EmbeddingService = Depends(EmbeddingService)
 ):
-    """混合搜索API"""
-    # 获取知识库配置
-    kb = db.query(KnowledgeBase).filter(KnowledgeBase.id == knowledge_base_id).first()
-    if not kb:
-        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    """混合搜索API（pgroonga全文 + 向量）"""
+    try:
+        # 验证知识库ID格式
+        try:
+            kb_uuid = uuid.UUID(knowledge_base_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid knowledge base ID format")
 
-    # 确定混合比例
-    hybrid_ratio = kb.hybrid_ratio
+        # 获取知识库配置
+        kb = db.query(KnowledgeBase).filter(KnowledgeBase.id == kb_uuid).first()
+        if not kb:
+            raise HTTPException(status_code=404, detail="Knowledge base not found")
 
-    # 1. 执行文本搜索 (BM25)
-    text_results = get_text_search_results(db, knowledge_base_id, request.query, request.limit)
-    text_chunks, text_scores = zip(*text_results) if text_results else ([], [])
+        # 确定混合比例
+        hybrid_ratio = kb.hybrid_ratio
 
-    # 2. 执行向量搜索
-    vector_results = get_vector_search_results(db, knowledge_base_id, request.query, request.limit, embedding_service)
-    vector_chunks, vector_scores = zip(*vector_results) if vector_results else ([], [])
+        # 并行执行两种搜索
+        text_results = get_text_search_results(db, kb_uuid, request.query, request.limit * 2)
+        vector_results = get_vector_search_results(db, kb_uuid, request.query, request.limit * 2, embedding_service)
 
-    # 3. 归一化分数
-    text_scores_norm = normalize_scores(text_scores)
-    vector_scores_norm = normalize_scores(vector_scores)
+        # 处理结果
+        text_chunks, text_scores = zip(*text_results) if text_results else ([], [])
+        vector_chunks, vector_scores = zip(*vector_results) if vector_results else ([], [])
 
-    # 4. 合并结果并计算混合分数
-    all_chunks = {}
+        # 归一化分数
+        text_scores_norm = normalize_scores(text_scores) if text_scores else []
+        vector_scores_norm = normalize_scores(vector_scores) if vector_scores else []
 
-    # 添加文本搜索结果
-    for chunk, score in zip(text_chunks, text_scores_norm):
-        if chunk.id not in all_chunks:
-            all_chunks[chunk.id] = {
-                'chunk': chunk,
-                'text_score': score,
-                'vector_score': 0.0  # 默认值
-            }
+        # 合并结果
+        merged_results = merge_search_results(
+            text_chunks=text_chunks,
+            text_scores=text_scores_norm,
+            vector_chunks=vector_chunks,
+            vector_scores=vector_scores_norm,
+            hybrid_ratio=hybrid_ratio
+        )
 
-    # 添加向量搜索结果
-    for chunk, score in zip(vector_chunks, vector_scores_norm):
-        if chunk.id in all_chunks:
-            all_chunks[chunk.id]['vector_score'] = score
+        # 返回Top-K结果
+        return [
+            SearchResult(
+                content=chunk.content,
+                file_name=chunk.file_name,
+                file_id=chunk.file_id,
+                chunk_index=chunk.chunk_index,
+                score=score
+            )
+            for chunk, score in merged_results[:request.limit]
+        ]
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"搜索失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error during search")
+
+
+def normalize_scores(scores: List[float]) -> List[float]:
+    """归一化分数到[0,1]范围"""
+    if not scores:
+        return []
+
+    scores_arr = np.array(scores)
+    if np.all(scores_arr == scores_arr[0]):  # 所有分数相同
+        return [0.5] * len(scores_arr)
+
+    scaler = MinMaxScaler()
+    normalized = scaler.fit_transform(scores_arr.reshape(-1, 1)).flatten()
+    return normalized.tolist()
+
+
+def merge_search_results(
+        text_chunks: List[KnowledgeBaseChunk],
+        text_scores: List[float],
+        vector_chunks: List[KnowledgeBaseChunk],
+        vector_scores: List[float],
+        hybrid_ratio: float
+) -> List[Tuple[KnowledgeBaseChunk, float]]:
+    """合并两种搜索结果并计算加权分数"""
+    chunk_map = {}
+
+    # 添加文本结果
+    for chunk, score in zip(text_chunks, text_scores):
+        chunk_map[chunk.id] = {
+            "chunk": chunk,
+            "text_score": score,
+            "vector_score": 0.0
+        }
+
+    # 添加向量结果
+    for chunk, score in zip(vector_chunks, vector_scores):
+        if chunk.id in chunk_map:
+            chunk_map[chunk.id]["vector_score"] = score
         else:
-            all_chunks[chunk.id] = {
-                'chunk': chunk,
-                'text_score': 0.0,  # 默认值
-                'vector_score': score
+            chunk_map[chunk.id] = {
+                "chunk": chunk,
+                "text_score": 0.0,
+                "vector_score": score
             }
 
     # 计算混合分数
     results = []
-    for chunk_data in all_chunks.values():
-        hybrid_score = (hybrid_ratio * chunk_data['text_score'] +
-                        (1 - hybrid_ratio) * chunk_data['vector_score'])
-        results.append({
-            'chunk': chunk_data['chunk'],
-            'score': hybrid_score
-        })
+    for data in chunk_map.values():
+        hybrid_score = (hybrid_ratio * data["text_score"] +
+                        (1 - hybrid_ratio) * data["vector_score"])
+        results.append((data["chunk"], hybrid_score))
 
-    # 按混合分数排序
-    sorted_results = sorted(results, key=lambda x: x['score'], reverse=True)[:request.limit]
-
-    # 转换为响应模型
-    return [
-        SearchResult(
-            content=result['chunk'].content,
-            file_name=result['chunk'].file_name,
-            file_id=result['chunk'].file_id,
-            chunk_index=result['chunk'].chunk_index,
-            score=result['score']
-        )
-        for result in sorted_results
-    ]
+    # 按分数排序
+    return sorted(results, key=lambda x: x[1], reverse=True)
 
 # 索引健康检查端点（可选）
 @router.get("/search/status")
