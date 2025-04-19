@@ -29,3 +29,4 @@ jieba~=0.42.1
 nltk
 rank-bm25~=0.2.2
 scikit-learn~=1.5.2
+nest_asyncio

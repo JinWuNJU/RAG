@@ -195,27 +195,41 @@ async def create_evaluation_task(
         def run_evaluation_in_thread():
             from sqlalchemy.orm import sessionmaker
             from database import engine
+            import asyncio
+            import nest_asyncio
+            
+            # 为当前线程创建独立的事件循环
             LocalSession = sessionmaker(bind=engine)
             local_db = LocalSession()
             try:
-                # 执行异步评估任务，但在单独的线程中同步运行
-                import asyncio
+                # 防止嵌套事件循环问题
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
+                nest_asyncio.apply(loop)
                 
-                loop.run_until_complete(
-                    run_evaluation_async(
-                        db=local_db,
-                        record_id=record_id,
-                        file_id=request.file_id,
-                        metric_id=request.metric_id,
-                        system_prompt=request.system_prompt
-                    )
-                )
-                loop.close()
+                # 在事件循环中执行异步评估
+                async def run_task():
+                    try:
+                        await run_evaluation_async(
+                            db=local_db,
+                            record_id=record_id,
+                            file_id=request.file_id,
+                            metric_id=request.metric_id,
+                            system_prompt=request.system_prompt
+                        )
+                    finally:
+                        pass
+                
+                # 运行异步任务并确保完成
+                loop.run_until_complete(run_task())
             except Exception as e:
                 print(f"后台评估线程出错: {str(e)}")
             finally:
+                try:
+                    loop.run_until_complete(loop.shutdown_asyncgens())
+                    loop.close()
+                except Exception as e:
+                    print(f"关闭事件循环失败: {str(e)}")
                 local_db.close()
         
         # 启动真正后台运行的线程
@@ -375,27 +389,41 @@ async def create_iteration(
         def run_evaluation_in_thread():
             from sqlalchemy.orm import sessionmaker
             from database import engine
+            import asyncio
+            import nest_asyncio
+            
+            # 为当前线程创建独立的事件循环
             LocalSession = sessionmaker(bind=engine)
             local_db = LocalSession()
             try:
-                # 执行评估任务，在单独的线程中运行
-                import asyncio
+                # 防止嵌套事件循环问题
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
+                nest_asyncio.apply(loop)
                 
-                loop.run_until_complete(
-                    run_evaluation_in_background(
-                        db=local_db,
-                        record_id=record_id,
-                        file_content=file_content,
-                        metric_id=metric_id,
-                        system_prompt=request.system_prompt
-                    )
-                )
-                loop.close()
+                # 在事件循环中执行异步评估
+                async def run_task():
+                    try:
+                        await run_evaluation_in_background(
+                            db=local_db,
+                            record_id=record_id,
+                            file_content=file_content,
+                            metric_id=metric_id,
+                            system_prompt=request.system_prompt
+                        )
+                    finally:
+                        pass
+                
+                # 运行异步任务并确保完成
+                loop.run_until_complete(run_task())
             except Exception as e:
                 print(f"迭代评估线程出错: {str(e)}")
             finally:
+                try:
+                    loop.run_until_complete(loop.shutdown_asyncgens())
+                    loop.close()
+                except Exception as e:
+                    print(f"关闭事件循环失败: {str(e)}")
                 local_db.close()
         
         # 启动真正后台运行的线程
@@ -485,6 +513,7 @@ async def run_evaluation_in_background(
     import os
     from langchain_openai import ChatOpenAI
     from langchain.prompts import ChatPromptTemplate
+    from contextlib import asynccontextmanager
 
     # 创建独立session避免主线程session问题
     LocalSession = sessionmaker(bind=engine)
@@ -559,75 +588,62 @@ async def run_evaluation_in_background(
             
         logger.info(f"开始评估记录 {record_id}，使用指标: {evaluation_metrics}...")
         
-        try:
-            result = await service.evaluate(
-                questions=questions, 
-                answers=answers, 
-                metric_names=evaluation_metrics,
-                generated_responses=generated_responses
-            )
-            logger.info(f"评估完成，获得指标: {list(result.scores.keys())}")
-        except Exception as e:
-            logger.error(f"评估过程出错: {str(e)}")
-            # 如果评估失败，尝试回退到单指标评估
-            fallback_metric = evaluation_metrics[0]
-            logger.info(f"尝试回退到单一指标 {fallback_metric}")
-            
+        # 使用上下文管理器确保资源被正确释放
+        @asynccontextmanager
+        async def managed_evaluation():
             try:
                 result = await service.evaluate(
                     questions=questions, 
                     answers=answers, 
-                    metric_names=[fallback_metric],
+                    metric_names=evaluation_metrics,
                     generated_responses=generated_responses
                 )
-                logger.info(f"回退评估成功，使用指标: {fallback_metric}")
-            except Exception as fallback_error:
-                logger.error(f"回退评估也失败: {str(fallback_error)}")
-                # 创建一个模拟结果
-                from collections import namedtuple
-                Result = namedtuple('Result', ['scores'])
-                result = Result(scores={
-                    fallback_metric: 0.7  # 默认分数
-                })
-                logger.warning("使用默认分数完成评估")
+                yield result
+            except Exception as e:
+                logger.error(f"评估过程出错: {str(e)}")
+                # 如果评估失败，尝试回退到单指标评估
+                fallback_metric = evaluation_metrics[0]
+                logger.info(f"尝试回退到单一指标 {fallback_metric}")
+                
+                try:
+                    result = await service.evaluate(
+                        questions=questions, 
+                        answers=answers, 
+                        metric_names=[fallback_metric],
+                        generated_responses=generated_responses
+                    )
+                    logger.info(f"回退评估成功，使用指标: {fallback_metric}")
+                    yield result
+                except Exception as fallback_error:
+                    logger.error(f"回退评估也失败: {str(fallback_error)}")
+                    # 创建一个模拟结果
+                    from collections import namedtuple
+                    Result = namedtuple('Result', ['scores'])
+                    result = Result(scores={
+                        fallback_metric: 0.7  # 默认分数
+                    })
+                    logger.warning("使用默认分数完成评估")
+                    yield result
 
-        # 准备详细结果
-        detailed_results = {
-            "scores": result.scores,
-            "samples": []
-        }
+        # 使用上下文管理器确保资源正确释放
+        async with managed_evaluation() as result:
+            logger.info(f"评估完成，获得指标: {list(result.scores.keys())}")
+            
+            # 准备详细结果
+            detailed_results = {
+                "scores": result.scores,
+                "samples": []
+            }
 
-        # 首选的评估指标
-        primary_metric = evaluation_metrics[0]
-        
-        # 将评估结果组织成样本列表
-        metric_scores = result.scores.get(primary_metric, {})
-        if isinstance(metric_scores, float):
-            # 单一分数
-            for i, (q, a, g) in enumerate(zip(questions, answers, generated_responses)):
-                sample_details = {primary_metric: metric_scores}
-                # 添加其他指标
-                for other_metric in evaluation_metrics[1:]:
-                    if other_metric in result.scores:
-                        other_scores = result.scores[other_metric]
-                        if isinstance(other_scores, list) and i < len(other_scores):
-                            sample_details[other_metric] = other_scores[i]
-                        elif not isinstance(other_scores, list):
-                            sample_details[other_metric] = other_scores
-                            
-                detailed_results["samples"].append({
-                    "query": q,
-                    "answer": a,
-                    "generated": g,
-                    "score": metric_scores,  # 主评估指标分数作为总分
-                    "details": sample_details
-                })
-        else:
-            # 每个样本有独立分数
-            for i, (q, a, g) in enumerate(zip(questions, answers, generated_responses)):
-                if i < len(metric_scores):
-                    score = metric_scores[i]
-                    sample_details = {primary_metric: score}
+            # 首选的评估指标
+            primary_metric = evaluation_metrics[0]
+            
+            # 将评估结果组织成样本列表
+            metric_scores = result.scores.get(primary_metric, {})
+            if isinstance(metric_scores, float):
+                # 单一分数
+                for i, (q, a, g) in enumerate(zip(questions, answers, generated_responses)):
+                    sample_details = {primary_metric: metric_scores}
                     # 添加其他指标
                     for other_metric in evaluation_metrics[1:]:
                         if other_metric in result.scores:
@@ -641,19 +657,41 @@ async def run_evaluation_in_background(
                         "query": q,
                         "answer": a,
                         "generated": g,
-                        "score": score,  # 主评估指标分数作为总分
+                        "score": metric_scores,  # 主评估指标分数作为总分
                         "details": sample_details
                     })
+            else:
+                # 每个样本有独立分数
+                for i, (q, a, g) in enumerate(zip(questions, answers, generated_responses)):
+                    if i < len(metric_scores):
+                        score = metric_scores[i]
+                        sample_details = {primary_metric: score}
+                        # 添加其他指标
+                        for other_metric in evaluation_metrics[1:]:
+                            if other_metric in result.scores:
+                                other_scores = result.scores[other_metric]
+                                if isinstance(other_scores, list) and i < len(other_scores):
+                                    sample_details[other_metric] = other_scores[i]
+                                elif not isinstance(other_scores, list):
+                                    sample_details[other_metric] = other_scores
+                                    
+                        detailed_results["samples"].append({
+                            "query": q,
+                            "answer": a,
+                            "generated": g,
+                            "score": score,  # 主评估指标分数作为总分
+                            "details": sample_details
+                        })
 
-        # 更新评估记录
-        record = local_db.query(EvaluationRecord).filter_by(id=record_id).first()
-        if record:
-            record.results = detailed_results
-            record.task.status = "completed"
-            local_db.commit()
-            logger.success(f"评估记录 {record_id} 完成")
-        else:
-            logger.error(f"评估记录 {record_id} 不存在")
+            # 更新评估记录
+            record = local_db.query(EvaluationRecord).filter_by(id=record_id).first()
+            if record:
+                record.results = detailed_results
+                record.task.status = "completed"
+                local_db.commit()
+                logger.success(f"评估记录 {record_id} 完成")
+            else:
+                logger.error(f"评估记录 {record_id} 不存在")
 
     except Exception as e:
         logger.error(f"评估记录 {record_id} 失败: {str(e)}")
@@ -664,4 +702,36 @@ async def run_evaluation_in_background(
             record.task.error_message = str(e)
             local_db.commit()
     finally:
+        # 确保关闭数据库连接
         local_db.close()
+        
+        # 强制清理所有异步资源
+        try:
+            import asyncio
+            # 清理LLM资源
+            if 'chain' in locals() and chain is not None:
+                if hasattr(chain, 'aclose'):
+                    try:
+                        logger.info("关闭chain资源")
+                        asyncio.create_task(chain.aclose())
+                    except Exception as e:
+                        logger.error(f"关闭chain资源失败: {str(e)}")
+
+            # 检查当前事件循环中的所有任务是否完成
+            pending = asyncio.all_tasks()
+            if pending:
+                logger.info(f"等待 {len(pending)} 个待处理任务完成")
+                # 等待所有任务完成，但设置超时
+                try:
+                    done, still_pending = await asyncio.wait(pending, timeout=3.0)
+                    if still_pending:
+                        logger.warning(f"仍有 {len(still_pending)} 个任务未完成，但继续执行")
+                except Exception as e:
+                    logger.error(f"等待任务完成时出错: {str(e)}")
+            
+            # 强制清理内存
+            import gc
+            gc.collect()
+            logger.info("资源清理完成")
+        except Exception as final_e:
+            logger.error(f"最终清理过程出错: {str(final_e)}")

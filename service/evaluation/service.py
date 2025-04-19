@@ -180,7 +180,8 @@ class SimplePromptEvaluator:
         ])
         
         self.chain = self.template | self.llm
-    
+        self._client = None
+
     async def evaluate_answer(self, question, reference, generated):
         """评估单个生成答案，返回0-10分"""
         try:
@@ -208,6 +209,30 @@ class SimplePromptEvaluator:
             logger.error(f"评估答案时出错: {str(e)}")
             # 出错时返回中间分数
             return 0.5
+            
+    async def aclose(self):
+        """关闭异步资源"""
+        logger.info("正在关闭SimplePromptEvaluator异步资源")
+        if hasattr(self.llm, 'client') and self.llm.client:
+            if hasattr(self.llm.client, 'aclose'):
+                try:
+                    logger.info("关闭LLM HTTP客户端")
+                    await self.llm.client.aclose()
+                    logger.info("LLM HTTP客户端已关闭")
+                except Exception as e:
+                    logger.error(f"关闭LLM client失败: {str(e)}")
+        
+        # 查找并关闭任何其他可能的异步客户端
+        if hasattr(self, 'chain') and self.chain:
+            for obj in [self.chain, self.llm, self.template]:
+                if hasattr(obj, '_transport'):
+                    try:
+                        logger.info(f"关闭发现的HTTP传输: {obj.__class__.__name__}")
+                        await obj._transport.aclose()
+                    except Exception as e:
+                        logger.error(f"关闭额外传输失败: {str(e)}")
+                        
+        logger.info("SimplePromptEvaluator异步资源关闭完成")
 
 
 class EvaluationService:
@@ -254,65 +279,96 @@ class EvaluationService:
         """执行评估，支持ragas指标和自定义指标"""
         result_scores = {}
         
-        for metric_name in metric_names:
-            if metric_name not in self.metrics:
-                logger.warning(f"未知评估指标: {metric_name}")
-                continue
-                
-            metric_info = self.metrics[metric_name]
-            implementation = metric_info["implementation"]
-            
-            if implementation == "custom_prompt_scoring" and generated_responses:
-                # 使用裁判LLM评估
-                scores = await self._evaluate_with_prompt_scs(questions, answers, generated_responses)
-                result_scores[metric_name] = scores
-                
-            elif implementation == "bleu_scoring" and generated_responses:
-                # 使用BLEU评估
-                scores = self._evaluate_with_bleu(answers, generated_responses)
-                result_scores[metric_name] = scores
-                
-            elif isinstance(implementation, str):
-                # 其他自定义实现但没有生成的回答 - 返回模拟数据
-                mock_result = self._get_mock_evaluation_result(questions, metric_name)
-                result_scores[metric_name] = mock_result.scores[metric_name]
-                
-            else:
-                # 使用ragas评估
-                try:
-                    from datasets import Dataset
+        try:
+            for metric_name in metric_names:
+                if metric_name not in self.metrics:
+                    logger.warning(f"未知评估指标: {metric_name}")
+                    continue
                     
-                    # 构建Dataset格式
-                    data = {
-                        "question": questions,
-                        "answer": answers,
-                    }
-                    # 如果有生成的回答，添加到数据集
-                    if generated_responses:
-                        data["generated_answer"] = generated_responses
-                        
-                    dataset = Dataset.from_dict(data)
+                metric_info = self.metrics[metric_name]
+                implementation = metric_info["implementation"]
+                
+                if implementation == "custom_prompt_scoring" and generated_responses:
+                    # 使用裁判LLM评估
+                    scores = await self._evaluate_with_prompt_scs(questions, answers, generated_responses)
+                    result_scores[metric_name] = scores
                     
-                    # 使用ragas评估
-                    ragas_result = evaluate(
-                        dataset=dataset,
-                        metrics=[implementation],
-                        llm=self.evaluator_llm
-                    )
+                elif implementation == "bleu_scoring" and generated_responses:
+                    # 使用BLEU评估
+                    scores = self._evaluate_with_bleu(answers, generated_responses)
+                    result_scores[metric_name] = scores
                     
-                    # 合并结果
-                    for k, v in ragas_result.scores.items():
-                        result_scores[k] = v
-                        
-                except Exception as e:
-                    logger.error(f"Ragas评估执行失败: {str(e)}")
-                    # 发生错误时返回模拟数据
+                elif isinstance(implementation, str):
+                    # 其他自定义实现但没有生成的回答 - 返回模拟数据
                     mock_result = self._get_mock_evaluation_result(questions, metric_name)
                     result_scores[metric_name] = mock_result.scores[metric_name]
+                    
+                else:
+                    # 使用ragas评估
+                    try:
+                        from datasets import Dataset
+                        
+                        # 构建Dataset格式
+                        data = {
+                            "question": questions,
+                            "answer": answers,
+                        }
+                        # 如果有生成的回答，添加到数据集
+                        if generated_responses:
+                            data["generated_answer"] = generated_responses
+                            
+                        dataset = Dataset.from_dict(data)
+                        
+                        # 使用ragas评估
+                        ragas_result = evaluate(
+                            dataset=dataset,
+                            metrics=[implementation],
+                            llm=self.evaluator_llm
+                        )
+                        
+                        # 合并结果
+                        for k, v in ragas_result.scores.items():
+                            result_scores[k] = v
+                            
+                    except Exception as e:
+                        logger.error(f"Ragas评估执行失败: {str(e)}")
+                        # 发生错误时返回模拟数据
+                        mock_result = self._get_mock_evaluation_result(questions, metric_name)
+                        result_scores[metric_name] = mock_result.scores[metric_name]
+            
+            # 包装结果
+            Result = namedtuple('Result', ['scores'])
+            return Result(scores=result_scores)
+        finally:
+            # 确保在评估完成后清理资源
+            await self._cleanup_resources()
+    
+    async def _cleanup_resources(self):
+        """清理异步资源"""
+        logger.info("开始清理EvaluationService异步资源")
         
-        # 包装结果
-        Result = namedtuple('Result', ['scores'])
-        return Result(scores=result_scores)
+        try:
+            # 关闭评估器
+            if self.prompt_evaluator:
+                logger.info("关闭prompt_evaluator")
+                await self.prompt_evaluator.aclose()
+                
+            # 关闭LLM
+            if self.llm and hasattr(self.llm, 'client') and self.llm.client:
+                if hasattr(self.llm.client, 'aclose'):
+                    logger.info("关闭主LLM客户端")
+                    await self.llm.client.aclose()
+                    
+            # 关闭ragas评估器LLM
+            if hasattr(self, 'evaluator_llm') and self.evaluator_llm:
+                logger.info("关闭evaluator_llm资源")
+                if hasattr(self.evaluator_llm, 'llm') and hasattr(self.evaluator_llm.llm, 'client'):
+                    await self.evaluator_llm.llm.client.aclose()
+                    
+        except Exception as e:
+            logger.error(f"清理异步资源失败: {str(e)}")
+            
+        logger.info("EvaluationService异步资源清理完成")
     
     async def _evaluate_with_prompt_scs(self, questions, references, generated_responses):
         """使用裁判LLM评估生成答案"""
