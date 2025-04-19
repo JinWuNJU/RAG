@@ -185,6 +185,40 @@ async def upload_knowledge(
     except FileSizeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@router.post("/rag/eval_data/upload", response_model=FileUploadResponse)
+async def upload_rag_eval_data(
+    file: UploadFile = File(...),
+    max_size_mb: float = Form(10.0),
+    db: Session = Depends(get_db),
+    Authorize: AuthJWT = Depends()
+):
+    """
+    上传RAG评估数据文件（JSON格式）
+    
+    参数:
+        file: 上传的文件（JSON格式，包含query、answer、retrieved_contexts字段）
+        max_size_mb: 最大文件大小（默认10MB）
+        
+    返回:
+        文件ID
+    """
+    
+    try:
+        file_id = await upload_to_database(
+            file=file,
+            db=db,
+            allowed_types=["application/json"],
+            max_size_mb=max_size_mb,
+            user_id=auth.decode_jwt_to_uid(Authorize)
+        )
+
+        return FileUploadResponse(file_id=file_id)
+        
+    except FileTypeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileSizeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @router.get("/", response_model=List[FileMetadata])
 async def list_my_files(
     include_public: bool = Query(False, description="包含所有公开文件"),

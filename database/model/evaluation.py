@@ -1,5 +1,5 @@
 # database/model/evaluation.py
-from sqlalchemy import Column, String, JSON, DateTime, ForeignKey
+from sqlalchemy import Column, String, JSON, DateTime, ForeignKey, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from database.model import Base
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -14,6 +14,7 @@ class EvaluationTask(Base):
     status: Mapped[str] = mapped_column(String(20), default="processing")
     created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False)
     error_message: Mapped[str | None] = mapped_column(String(500))
+    is_rag_task: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # 添加反向关系
     records = relationship("EvaluationRecord", back_populates="task")

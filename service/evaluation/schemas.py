@@ -7,46 +7,57 @@ class Metric(BaseModel):
     id: str
     name: str
     description: str
+    type: Optional[str] = None  # 新增字段，用于标识指标类型 (prompt/rag)
 
 class EvaluationRequest(BaseModel):
-    metric_id: str
     task_name: str
-    system_prompt: str
     file_id: str
+    metric_id: str
+    system_prompt: str
 
 class EvaluationIterationRequest(BaseModel):
     task_id: str
     system_prompt: str
 
-class EvaluationResultItem(BaseModel):
+# 新增RAG评估相关模型
+class RAGEvaluationRequest(BaseModel):
+    task_name: str
+    file_id: str
+    metric_ids: List[str]  # 可以选择多个评估指标
+
+class RAGIterationRequest(BaseModel):
+    task_id: str
+    file_id: str  # RAG评估需要上传新的文件而不是修改prompt
+
+class RAGSampleItem(BaseModel):
     query: str
     answer: str
-    generated: Optional[str] = None
-    score: float
-    details: dict
+    retrieved_contexts: List[str]
+    ground_truth: Optional[str] = None
 
 class EvaluationRecordResponse(BaseModel):
-    id: UUID
+    id: str
     task_id: str
-    system_prompt: str
-    created_at: Union[datetime, int, str]
+    system_prompt: Optional[str] = None
+    created_at: int  # 时间戳
     status: str
     score: Optional[float] = None
     detailed_results: Optional[Dict[str, Any]] = None
+    
+class EvaluationTasksResponse(BaseModel):
+    tasks: List[Any]
+    total: int
 
 class EvaluationTaskItem(BaseModel):
     id: str
     name: str
-    created_at: Union[datetime, int]
-    metric_id: str
-    metric_name: str
+    created_at: int  # 时间戳
+    metric_id: str = ""
+    metric_name: str = ""
     status: str
-    dataset_id: str
+    dataset_id: str = ""
     iterations: int = 0
-
-class EvaluationTasksResponse(BaseModel):
-    tasks: List[EvaluationTaskItem]
-    total: int
+    is_rag_task: bool = False  # 新增标识是否为RAG评估任务的字段
 
 class EvaluationTaskCreateResponse(BaseModel):
     task_id: str
@@ -58,3 +69,22 @@ class EvaluationIterationResponse(BaseModel):
 class DeleteTaskResponse(BaseModel):
     success: bool
     message: str
+
+# 新增RAG评估任务项模型，专门用于RAG评估API返回
+class RAGEvaluationTaskItem(BaseModel):
+    id: str
+    name: str
+    created_at: int  # 时间戳
+    metric_id: str = ""
+    metric_ids: Optional[List[str]] = None  # RAG评估可能使用多个指标
+    metric_name: str = ""
+    status: str
+    dataset_id: str = ""  # 保持向后兼容
+    file_id: str = ""     # 新字段名称
+    iterations: int = 0
+    is_rag_task: bool = True  # 始终为True
+
+# 新增RAG评估任务列表响应模型
+class RAGEvaluationTasksResponse(BaseModel):
+    tasks: List[RAGEvaluationTaskItem]
+    total: int
