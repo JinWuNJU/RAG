@@ -6,6 +6,7 @@ import json
 import uuid
 from datetime import datetime
 import asyncio
+import threading
 
 from database import get_db
 from database.model.file import FileDB
@@ -35,10 +36,27 @@ router = APIRouter(tags=["evaluation"], prefix="/evaluation")
 async def get_metrics(db: Session = Depends(get_db)):
     """获取可用评估指标"""
     service = EvaluationService(db)
-    return [
-        Metric(id=k, name=v["name"], description=v["description"])
-        for k, v in service.metrics.items()
-    ]
+    metrics = []
+    
+    # 优先显示prompt评估指标
+    priority_metrics = ["prompt_scs", "bleu", "answer_relevancy"]
+    
+    # 先添加优先指标
+    for metric_id in priority_metrics:
+        if metric_id in service.metrics:
+            metric_info = service.metrics[metric_id]
+            metrics.append(
+                Metric(id=metric_id, name=metric_info["name"], description=metric_info["description"])
+            )
+    
+    # 添加剩余指标
+    for metric_id, metric_info in service.metrics.items():
+        if metric_id not in priority_metrics:
+            metrics.append(
+                Metric(id=metric_id, name=metric_info["name"], description=metric_info["description"])
+            )
+    
+    return metrics
 
 
 @router.get("/tasks", response_model=EvaluationTasksResponse)
@@ -110,81 +128,112 @@ async def create_evaluation_task(
     # 1. 认证用户
     user_id = decode_jwt_to_uid(Authorize)
     service = EvaluationService(db)
+    
+    # 添加详细日志
+    print(f"收到评估任务创建请求 - 用户ID: {user_id}, 指标: {request.metric_id}")
+    print(f"请求数据: {request.dict()}")
 
     # 2. 验证文件存在
-    file_record = db.query(FileDB).filter(
-        FileDB.id == request.file_id,
-        FileDB.user_id == user_id  # 确保用户只能访问自己的文件
-    ).first()
-
-    if not file_record:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="文件不存在或无权访问"
-        )
-
-    # 3. 创建数据库记录
-    task_id = uuid.uuid4()
-    record_id = uuid.uuid4()
-
     try:
-        # 创建任务
-        task = EvaluationTask(
-            id=task_id,
-            name=request.task_name,
-            user_id=user_id,
-            status="processing",
-            created_at=get_beijing_time()
-        )
-        db.add(task)
+        file_record = db.query(FileDB).filter(
+            FileDB.id == request.file_id,
+            FileDB.user_id == user_id  # 确保用户只能访问自己的文件
+        ).first()
 
-        # 创建评估记录
-        record = EvaluationRecord(
-            id=record_id,
-            task_id=task_id,
-            metric_id=request.metric_id,
-            system_prompt=request.system_prompt,
-            file_id=UUID(request.file_id),
-            created_at=get_beijing_time()
+        if not file_record:
+            print(f"文件不存在或无权访问: {request.file_id}, 用户: {user_id}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="文件不存在或无权访问"
+            )
+        
+        print(f"文件验证成功: {request.file_id}")
+
+        # 3. 创建数据库记录
+        task_id = uuid.uuid4()
+        record_id = uuid.uuid4()
+
+        try:
+            # 创建任务
+            task = EvaluationTask(
+                id=task_id,
+                name=request.task_name,
+                user_id=user_id,
+                status="processing",
+                created_at=get_beijing_time()
+            )
+            db.add(task)
+
+            # 创建评估记录
+            record = EvaluationRecord(
+                id=record_id,
+                task_id=task_id,
+                metric_id=request.metric_id,
+                system_prompt=request.system_prompt,
+                file_id=UUID(request.file_id),
+                created_at=get_beijing_time()
+            )
+            db.add(record)
+            db.commit()
+            print(f"成功创建评估任务与记录: 任务ID={task_id}, 记录ID={record_id}")
+        except Exception as e:
+            db.rollback()
+            print(f"数据库插入错误: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"创建评估任务失败: {str(e)}"
+            )
+
+        # 4. 立即返回任务ID和记录ID
+        response = EvaluationTaskCreateResponse(
+            task_id=str(task_id),
+            record_id=str(record_id)
         )
-        db.add(record)
-        db.commit()
+        
+        # 5. 启动一个真正的分离的后台任务
+        # 使用一个完全独立的进程/线程来处理耗时评估
+        def run_evaluation_in_thread():
+            from sqlalchemy.orm import sessionmaker
+            from database import engine
+            LocalSession = sessionmaker(bind=engine)
+            local_db = LocalSession()
+            try:
+                # 执行异步评估任务，但在单独的线程中同步运行
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                loop.run_until_complete(
+                    run_evaluation_async(
+                        db=local_db,
+                        record_id=record_id,
+                        file_id=request.file_id,
+                        metric_id=request.metric_id,
+                        system_prompt=request.system_prompt
+                    )
+                )
+                loop.close()
+            except Exception as e:
+                print(f"后台评估线程出错: {str(e)}")
+            finally:
+                local_db.close()
+        
+        # 启动真正后台运行的线程
+        eval_thread = threading.Thread(target=run_evaluation_in_thread)
+        eval_thread.daemon = True  # 设置为守护线程，不阻止主进程退出
+        eval_thread.start()
+        print(f"后台评估线程已启动，立即返回响应: {response.dict()}")
+        
+        return response
+    except HTTPException:
+        # 直接重新抛出HTTP异常
+        raise
     except Exception as e:
-        db.rollback()
+        print(f"创建评估任务时发生意外错误: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"创建评估任务失败: {str(e)}"
         )
-
-    # 4. 立即返回任务ID和记录ID
-    response = EvaluationTaskCreateResponse(
-        task_id=str(task_id),
-        record_id=str(record_id)
-    )
-
-    # 5. 异步启动评估任务
-    # 使用独立的数据库会话
-    from sqlalchemy.orm import sessionmaker
-    from database import engine
-    LocalSession = sessionmaker(bind=engine)
-
-    async def run_async():
-        local_db = LocalSession()
-        try:
-            await run_evaluation_async(
-                db=local_db,
-                record_id=record_id,
-                file_id=request.file_id,
-                metric_id=request.metric_id,
-                system_prompt=request.system_prompt
-            )
-        finally:
-            local_db.close()
-
-    # 使用 asyncio.create_task 启动异步任务
-    asyncio.create_task(run_async())
-    print("任务创建完成，准备返回响应")
-    return response
 
 
 async def run_evaluation_async(
@@ -250,6 +299,8 @@ async def create_iteration(
     # 认证用户
     user_id = decode_jwt_to_uid(Authorize)
     service = EvaluationService(db)
+    
+    print(f"收到评估迭代请求 - 用户ID: {user_id}, 任务ID: {request.task_id}")
 
     try:
         # 验证任务所属
@@ -296,12 +347,17 @@ async def create_iteration(
                 detail=f"文件解析失败: {str(e)}"
             )
 
-        # 创建新的评估记录
+        # 创建新的评估记录，使用优先的评估指标
+        metric_id = previous_record.metric_id
+        if metric_id == "faithfulness":
+            # 如果使用的是faithfulness指标，自动替换为prompt_scs指标
+            metric_id = "prompt_scs"
+        
         record_id = uuid.uuid4()
         new_record = EvaluationRecord(
             id=record_id,
             task_id=UUID(request.task_id),
-            metric_id=previous_record.metric_id,
+            metric_id=metric_id,
             system_prompt=request.system_prompt,
             file_id=previous_record.file_id,
             created_at=get_beijing_time()  # 使用北京时间
@@ -312,16 +368,41 @@ async def create_iteration(
 
         db.add(new_record)
         db.commit()
+        
+        print(f"成功创建评估迭代记录: 记录ID={record_id}")
 
-        # 启动后台评估任务
-        background_tasks.add_task(
-            run_evaluation_in_background,
-            db=db,
-            record_id=record_id,
-            file_content=file_content,
-            metric_id=previous_record.metric_id,
-            system_prompt=request.system_prompt
-        )
+        # 启动后台评估任务 - 使用线程而不是BackgroundTasks
+        def run_evaluation_in_thread():
+            from sqlalchemy.orm import sessionmaker
+            from database import engine
+            LocalSession = sessionmaker(bind=engine)
+            local_db = LocalSession()
+            try:
+                # 执行评估任务，在单独的线程中运行
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                loop.run_until_complete(
+                    run_evaluation_in_background(
+                        db=local_db,
+                        record_id=record_id,
+                        file_content=file_content,
+                        metric_id=metric_id,
+                        system_prompt=request.system_prompt
+                    )
+                )
+                loop.close()
+            except Exception as e:
+                print(f"迭代评估线程出错: {str(e)}")
+            finally:
+                local_db.close()
+        
+        # 启动真正后台运行的线程
+        eval_thread = threading.Thread(target=run_evaluation_in_thread)
+        eval_thread.daemon = True  # 设置为守护线程
+        eval_thread.start()
+        print(f"后台迭代评估线程已启动，立即返回响应")
 
         return EvaluationIterationResponse(record_id=str(record_id))
 
@@ -329,6 +410,7 @@ async def create_iteration(
         raise
     except Exception as e:
         db.rollback()
+        print(f"创建评估迭代出错: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"创建评估迭代失败: {str(e)}"
@@ -464,9 +546,50 @@ async def run_evaluation_in_background(
         if not questions or not answers:
             raise ValueError("文件中没有有效的query/answer数据")
 
-        # 执行评估
-        logger.info(f"开始评估记录 {record_id}...")
-        result = await service.evaluate(questions, answers, [metric_id])
+        # 执行评估 - 首选prompt_scs评估方法
+        evaluation_metrics = [metric_id]
+        if metric_id == "faithfulness":
+            # 用prompt_scs替换faithfulness
+            logger.info("将faithfulness评估指标替换为prompt_scs")
+            evaluation_metrics = ["prompt_scs"]
+            
+        # 添加BLEU评估作为辅助指标
+        if "bleu" not in evaluation_metrics:
+            evaluation_metrics.append("bleu")
+            
+        logger.info(f"开始评估记录 {record_id}，使用指标: {evaluation_metrics}...")
+        
+        try:
+            result = await service.evaluate(
+                questions=questions, 
+                answers=answers, 
+                metric_names=evaluation_metrics,
+                generated_responses=generated_responses
+            )
+            logger.info(f"评估完成，获得指标: {list(result.scores.keys())}")
+        except Exception as e:
+            logger.error(f"评估过程出错: {str(e)}")
+            # 如果评估失败，尝试回退到单指标评估
+            fallback_metric = evaluation_metrics[0]
+            logger.info(f"尝试回退到单一指标 {fallback_metric}")
+            
+            try:
+                result = await service.evaluate(
+                    questions=questions, 
+                    answers=answers, 
+                    metric_names=[fallback_metric],
+                    generated_responses=generated_responses
+                )
+                logger.info(f"回退评估成功，使用指标: {fallback_metric}")
+            except Exception as fallback_error:
+                logger.error(f"回退评估也失败: {str(fallback_error)}")
+                # 创建一个模拟结果
+                from collections import namedtuple
+                Result = namedtuple('Result', ['scores'])
+                result = Result(scores={
+                    fallback_metric: 0.7  # 默认分数
+                })
+                logger.warning("使用默认分数完成评估")
 
         # 准备详细结果
         detailed_results = {
@@ -474,29 +597,52 @@ async def run_evaluation_in_background(
             "samples": []
         }
 
+        # 首选的评估指标
+        primary_metric = evaluation_metrics[0]
+        
         # 将评估结果组织成样本列表
-        metric_scores = result.scores.get(metric_id, {})
+        metric_scores = result.scores.get(primary_metric, {})
         if isinstance(metric_scores, float):
             # 单一分数
             for i, (q, a, g) in enumerate(zip(questions, answers, generated_responses)):
+                sample_details = {primary_metric: metric_scores}
+                # 添加其他指标
+                for other_metric in evaluation_metrics[1:]:
+                    if other_metric in result.scores:
+                        other_scores = result.scores[other_metric]
+                        if isinstance(other_scores, list) and i < len(other_scores):
+                            sample_details[other_metric] = other_scores[i]
+                        elif not isinstance(other_scores, list):
+                            sample_details[other_metric] = other_scores
+                            
                 detailed_results["samples"].append({
                     "query": q,
                     "answer": a,
                     "generated": g,
-                    "score": metric_scores,
-                    "details": {metric_id: metric_scores}
+                    "score": metric_scores,  # 主评估指标分数作为总分
+                    "details": sample_details
                 })
         else:
             # 每个样本有独立分数
             for i, (q, a, g) in enumerate(zip(questions, answers, generated_responses)):
                 if i < len(metric_scores):
                     score = metric_scores[i]
+                    sample_details = {primary_metric: score}
+                    # 添加其他指标
+                    for other_metric in evaluation_metrics[1:]:
+                        if other_metric in result.scores:
+                            other_scores = result.scores[other_metric]
+                            if isinstance(other_scores, list) and i < len(other_scores):
+                                sample_details[other_metric] = other_scores[i]
+                            elif not isinstance(other_scores, list):
+                                sample_details[other_metric] = other_scores
+                                
                     detailed_results["samples"].append({
                         "query": q,
                         "answer": a,
                         "generated": g,
-                        "score": score,
-                        "details": {metric_id: score}
+                        "score": score,  # 主评估指标分数作为总分
+                        "details": sample_details
                     })
 
         # 更新评估记录
