@@ -19,11 +19,13 @@ class KnowledgeBaseCreateResponse(BaseModel):
     knowledge_base_id: UUID
     status: str
 
-class KnowledgeBaseListItem(BaseModel):
-    """知识库列表项响应模型"""
+class KnowledgeBaseBasicInfo(BaseModel):
     knowledge_base_id: UUID
     name: str
     description: Optional[str]
+
+class KnowledgeBaseListItem(KnowledgeBaseBasicInfo):
+    """知识库列表项响应模型"""
     created_at: datetime
     status: str  # "building" 或 "completed"
 

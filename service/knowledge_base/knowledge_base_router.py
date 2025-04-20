@@ -236,11 +236,11 @@ def get_text_search_results(db: Session, knowledge_base_id: uuid.UUID, query: st
     return [(chunk_map[r[0]], float(r[1])) for r in results if r[0] in chunk_map]
 
 
-def get_vector_search_results(db: Session, knowledge_base_id: uuid.UUID, query: str, limit: int,
+async def get_vector_search_results(db: Session, knowledge_base_id: uuid.UUID, query: str, limit: int,
                               embedding_service: EmbeddingService):
     """使用向量相似度搜索"""
     # 获取查询的嵌入向量
-    query_embedding = embedding_service.embed_text(query)
+    query_embedding = await embedding_service.embed_text(query)
     if query_embedding is None:
         return []
 
@@ -289,7 +289,7 @@ async def hybrid_search(
 
         # 并行执行两种搜索
         text_results = get_text_search_results(db, kb_uuid, request.query, request.limit * 2)
-        vector_results = get_vector_search_results(db, kb_uuid, request.query, request.limit * 2, embedding_service)
+        vector_results = await get_vector_search_results(db, kb_uuid, request.query, request.limit * 2, embedding_service)
 
         # 处理结果
         text_chunks, text_scores = zip(*text_results) if text_results else ([], [])

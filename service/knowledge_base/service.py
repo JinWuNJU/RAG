@@ -87,13 +87,7 @@ class TextFileProcessor:
     async def _generate_embeddings(self, chunks: List[str]) -> List[Optional[np.ndarray]]:
         """异步生成嵌入向量"""
         try:
-            # 在实际应用中，这里可以使用批量处理提高效率
-            loop = asyncio.get_event_loop()
-            embeddings = await loop.run_in_executor(
-                None,
-                lambda: self.embedding_service.embed_batch(chunks)
-            )
-            return embeddings
+            return await self.embedding_service.embed_batch(chunks)
         except Exception as e:
             logger.error(f"生成嵌入向量时出错: {str(e)}")
             return [None] * len(chunks)
