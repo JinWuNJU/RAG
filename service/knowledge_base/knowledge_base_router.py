@@ -1,6 +1,4 @@
 from typing import Tuple, Any, Coroutine, Type
-from rank_bm25 import BM25Okapi
-import jieba
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sklearn.preprocessing import MinMaxScaler
 from sqlalchemy import text, exc
