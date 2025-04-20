@@ -98,3 +98,9 @@ EMB_API_KEY=用于获取文本嵌入的API KEY
 
 ZHIPU_API_KEY=智谱AI API KEY
 ```
+
+##  部署
+
+1. 部署到目标服务器采用shell 方式，以ssh方式登录到目标服务器，以scp 拷贝项目到目标地址/home/ubuntu/ragbackend，在目标路径中生成项目虚拟环境，且使用make server 启动服务，访问地址：http://172.29.4.37:8000。
+
+2. 项目只要有新的修改提交就会触发构建
