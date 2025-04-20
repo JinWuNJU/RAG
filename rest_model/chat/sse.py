@@ -30,10 +30,14 @@ class ChatBeginEvent(BaseEvent):
     chat_id: UUID
     user_message_id: UUID
     assistant_message_id: UUID
+    
+class ChatEndEvent(BaseEvent):
+    """SSE结束事件"""
+    type: Annotated[str, Literal["end"]] = "end"
 
 
 ToolEvent = ToolCallEvent | ToolReturnEvent
-SseEvent = ToolEvent | ChatEvent | ChatBeginEvent
+SseEvent = ToolEvent | ChatEvent | ChatBeginEvent | ChatEndEvent
 
 def SseEventPackage(event: SseEvent) -> dict:
     return {

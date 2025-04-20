@@ -27,7 +27,7 @@ from database import get_db_with
 from database.model.chat import ChatHistoryDB, ChatMessageDB
 from rest_model.chat.completions import MessagePayload
 from rest_model.chat.history import ChatDetail, ChatHistory, ChatToolCallPart, ChatToolReturnPart
-from rest_model.chat.sse import ChatBeginEvent, ChatEvent, SseEventPackage, ToolCallEvent, ToolReturnEvent
+from rest_model.chat.sse import ChatBeginEvent, ChatEndEvent, ChatEvent, SseEventPackage, ToolCallEvent, ToolReturnEvent
 from service.ai.chat.service_base import BaseChatService
 from dataclasses import dataclass, field
 from typing import Callable, Optional
@@ -280,6 +280,9 @@ class ChatService(BaseChatService):
                     db.commit()
             else:
                 logger.warning("Agent: query %s returned None", payload.content)
+            yield SseEventPackage(
+                ChatEndEvent()
+            )
 
     async def message_stream(self, user_id: uuid.UUID, payload: MessagePayload, background_tasks: BackgroundTasks) -> EventSourceResponse:
         with get_db_with() as db:
