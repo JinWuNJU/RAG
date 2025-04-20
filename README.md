@@ -80,7 +80,7 @@ DB_USER=数据库用户名 (例如: postgres)
 DB_PASS=数据库密码
 
 MOCKING_CHAT=true or false # 是否使用模拟llm聊天服务，默认true
-MOCKING_CHAT_LEGACY=true or false # 是否使用模拟服务的旧版本，默认true（新版本模拟了实际llm聊天的api，与现有前端所用接口不同）
+MOCKING_CHAT_LEGACY=true or false # 是否使用模拟服务的旧版本，默认false（新版本模拟了实际llm聊天的api，前端自4fe856d6起支持）
 
 
 # rag对话功能依赖

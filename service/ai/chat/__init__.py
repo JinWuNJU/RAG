@@ -15,7 +15,7 @@ router = APIRouter()
 def get_chat_service() -> BaseChatService:
     if os.getenv("MOCKING_CHAT", "true").lower() == "false":
         return ChatService()
-    if os.getenv("MOCKING_CHAT_LEGACY", "true").lower() == "true":
+    if os.getenv("MOCKING_CHAT_LEGACY", "false").lower() == "true":
         return MockChatServiceLegacy()
     return MockChatService()
 
