@@ -16,4 +16,4 @@ server:
 	uvicorn server:app --host 0.0.0.0 --port 8000 --reload
 
 build_image:
-	sudo docker build -t pg_roonga_vector:1.0 .
+	sudo docker build -f database.Dockerfile -t pg_roonga_vector:1.0 .
