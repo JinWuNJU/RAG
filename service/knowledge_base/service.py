@@ -166,7 +166,7 @@ class TextFileProcessor:
             db_chunk = KnowledgeBaseChunk(
                 knowledge_base_id=kb_id,
                 file_id=file_id,
-                chunk_index=i,
+                chunk_index=i + 1, # 从1开始
                 content=chunk,
                 file_name=filename,
                 embedding=embedding.tolist() if embedding is not None else None
