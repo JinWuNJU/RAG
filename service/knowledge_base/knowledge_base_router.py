@@ -264,7 +264,7 @@ async def get_vector_search_results(db: Session, knowledge_base_id: uuid.UUID, q
 
 
 
-@router.post("/{knowledge_base_id}/search", response_model=List[SearchResult])
+@router.post("/{knowledge_base_id}/search", response_model=List[SearchScoreResult])
 async def hybrid_search(
         knowledge_base_id: str,
         request: SearchRequest,
@@ -310,7 +310,7 @@ async def hybrid_search(
 
         # 返回Top-K结果
         return [
-            SearchResult(
+            SearchScoreResult(
                 content=chunk.content,
                 file_name=chunk.file_name,
                 file_id=chunk.file_id,

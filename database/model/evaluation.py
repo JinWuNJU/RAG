@@ -26,7 +26,7 @@ class EvaluationRecord(Base):
     id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     task_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("evaluation_tasks.id"), nullable=False)
     metric_id: Mapped[str] = mapped_column(String(50), nullable=False)
-    system_prompt: Mapped[str] = mapped_column(String, nullable=False)
+    system_prompt: Mapped[str] = mapped_column(String, nullable=True)
     file_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     results: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False)

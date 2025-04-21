@@ -46,6 +46,20 @@ class ChatMessageDB(Base):
         Index("idx_chat_messages_timestamp", "timestamp"),
     )
     
+class KnowledgeBaseList(TypeDecorator):
+    """知识库列表类型"""
+    impl = String
+
+    def process_bind_param(self, value, dialect):
+        if isinstance(value, list):
+            return ','.join([str(v) for v in value])
+        return None
+
+    def process_result_value(self, value, dialect):
+        if isinstance(value, str):
+            return [UUID(v) for v in value.split(',')]
+        return []
+    
 class ChatHistoryDB(Base):
     """数据库聊天历史存储模型"""
     __tablename__ = "chat_history"
@@ -55,6 +69,7 @@ class ChatHistoryDB(Base):
     user_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now())
+    knowledge_base: Mapped[List[UUID]] = mapped_column(KnowledgeBaseList, nullable=True)
     
     chat: Mapped[List["ChatMessageDB"]] = relationship("ChatMessageDB", back_populates="chat_history", order_by=ChatMessageDB.timestamp.asc())
     

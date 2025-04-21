@@ -4,6 +4,10 @@ from uuid import UUID
 import pydantic
 from pydantic import BaseModel, Field
 
+from database import get_db_with
+from database.model.knowledge_base import KnowledgeBase
+from rest_model.knowledge_base import KnowledgeBaseBasicInfo
+
 if TYPE_CHECKING:
     from database.model.chat import ChatMessageDB, ChatHistoryDB
 
@@ -80,12 +84,26 @@ class ChatDialog(BaseModel):
 class ChatDetail(ChatHistory):
     """单条聊天历史的对话详情"""
     chat: ChatDialog
+    knowledge_base: Optional[List[KnowledgeBaseBasicInfo]] = None
 
     @classmethod
     def from_orm(cls, obj: "ChatHistoryDB"):
         super_model = ChatHistory.from_orm(obj)
+        if obj.knowledge_base is None:
+            knowledge_base = None
+        else:
+            with get_db_with() as db:
+                knowledge_base = db.query(KnowledgeBase).filter(
+                    KnowledgeBase.id.in_(obj.knowledge_base)
+                ).all()
+                knowledge_base = [KnowledgeBaseBasicInfo(
+                        knowledge_base_id=kb.id,
+                        name=kb.name,
+                        description=kb.description
+                    ) for kb in knowledge_base]
         return cls(
             **super_model.model_dump(),
-            chat=ChatDialog(messages=[ChatMessage.from_orm(m) for m in obj.chat])
+            chat=ChatDialog(messages=[ChatMessage.from_orm(m) for m in obj.chat]),
+            knowledge_base=knowledge_base
         )
     
