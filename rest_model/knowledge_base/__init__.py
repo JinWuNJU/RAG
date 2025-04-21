@@ -62,7 +62,7 @@ class SearchRequest(BaseModel):
     query: str
     limit: int = 10  # 默认返回10条结果
 
-class SearchChunkResult(BaseModel):
+class SearchResult(BaseModel):
     content: str
     file_id: UUID
     chunk_index: int
@@ -71,8 +71,6 @@ class SearchChunkResult(BaseModel):
         json_encoders = {
             UUID: lambda v: str(v)  # UUID转为字符串
         }
-
-class SearchResult(SearchChunkResult):
     """搜索结果响应模型"""
     file_name: str    # 直接从knowledge_base_chunks表获取
 

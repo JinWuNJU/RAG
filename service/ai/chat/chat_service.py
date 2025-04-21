@@ -31,7 +31,7 @@ from database.model.knowledge_base import KnowledgeBase, KnowledgeBaseChunk
 from rest_model.chat.completions import MessagePayload
 from rest_model.chat.history import ChatDetail, ChatHistory, ChatToolCallPart, ChatToolReturnPart
 from rest_model.chat.sse import ChatBeginEvent, ChatEndEvent, ChatEvent, SseEventPackage, ToolCallEvent, ToolReturnEvent
-from rest_model.knowledge_base import KnowledgeBaseBasicInfo, SearchChunkResult, SearchResult, SearchRequest
+from rest_model.knowledge_base import KnowledgeBaseBasicInfo,  SearchResult, SearchRequest
 from service.ai.chat.service_base import BaseChatService
 from dataclasses import dataclass, field
 from typing import Callable, Optional
@@ -117,10 +117,11 @@ class RagService:
             if not result:
                 return "没有找到相关的知识"
             else:
-                return json.dumps([to_jsonable_python(SearchChunkResult(
+                return json.dumps([to_jsonable_python(SearchResult(
                     content=v.content,
                     file_id=v.file_id,
                     chunk_index=v.chunk_index,
+                    file_name=v.file_name
                 )) for v in result], ensure_ascii=False)
 
 class ChatService(BaseChatService):
