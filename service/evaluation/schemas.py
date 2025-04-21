@@ -9,6 +9,25 @@ class Metric(BaseModel):
     description: str
     type: Optional[str] = None  # 新增字段，用于标识指标类型 (prompt/rag)
 
+# 添加自定义指标的模型
+class CustomMetricDefinition(BaseModel):
+    name: str  # 自定义指标名称
+    description: str  # 指标描述
+    criteria: List[str]  # 评分标准列表
+    instruction: str  # 评分指导说明
+    scale: int = 10  # 评分尺度，默认10分制
+    type: str = "custom"  # 指标类型，custom或rubrics
+
+# 创建自定义指标请求
+class CustomMetricRequest(BaseModel):
+    metric_definition: CustomMetricDefinition
+
+# 添加自定义指标的评估请求
+class CustomMetricEvaluationRequest(BaseModel):
+    task_id: str
+    system_prompt: str
+    custom_metric_id: str  # 自定义指标ID
+
 class EvaluationRequest(BaseModel):
     task_name: str
     file_id: str
@@ -69,6 +88,11 @@ class EvaluationIterationResponse(BaseModel):
 class DeleteTaskResponse(BaseModel):
     success: bool
     message: str
+
+# 自定义指标创建响应
+class CustomMetricCreateResponse(BaseModel):
+    metric_id: str
+    name: str
 
 # 新增RAG评估任务项模型，专门用于RAG评估API返回
 class RAGEvaluationTaskItem(BaseModel):

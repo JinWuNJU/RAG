@@ -1,32 +1,40 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status
-from fastapi_jwt_auth2 import AuthJWT
-from sqlalchemy.orm import Session
-from uuid import UUID
+import os
 import json
 import uuid
-from datetime import datetime
-import asyncio
 import threading
-from typing import Optional, List
+from uuid import UUID
+from typing import List, Optional
+from datetime import datetime
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi_jwt_auth2 import AuthJWT
+from loguru import logger
 
-from database import get_db
-from database.model.file import FileDB
 from database.model.evaluation import EvaluationTask, EvaluationRecord
-from .service import EvaluationService
-from .schemas import (
-    Metric,
-    EvaluationRequest,
+from database.model.file import FileDB
+from utils.datetime_tools import get_beijing_time, to_timestamp_ms
+from service.evaluation.service import EvaluationService
+from service.evaluation.schemas import (
+    Metric, 
+    EvaluationRequest, 
+    EvaluationTasksResponse, 
+    EvaluationTaskItem, 
+    EvaluationTaskCreateResponse, 
     EvaluationRecordResponse,
-    EvaluationTasksResponse,
-    EvaluationTaskItem,
     EvaluationIterationRequest,
-    EvaluationTaskCreateResponse,
-    EvaluationIterationResponse, DeleteTaskResponse, RAGEvaluationRequest, RAGIterationRequest
+    EvaluationIterationResponse,
+    DeleteTaskResponse,
+    RAGEvaluationRequest,
+    RAGIterationRequest,
+    CustomMetricRequest,
+    CustomMetricCreateResponse,
+    CustomMetricEvaluationRequest
 )
-from ..user.auth import decode_jwt_to_uid
-from utils.datetime_tools import get_beijing_time, to_timestamp_ms  # 导入工具函数
+from database import get_db
 
 from . import router as evaluation_router
+from ..user.auth import decode_jwt_to_uid
 from ..user.user_router import router as user_router
 
 __all__ = ["evaluation_router", "user_router"]
@@ -35,42 +43,41 @@ router = APIRouter(tags=["evaluation"], prefix="/evaluation")
 
 @router.get("/metrics", response_model=list[Metric])
 async def get_metrics(db: Session = Depends(get_db), type: Optional[str] = None):
-    """获取可用评估指标，可以按类型过滤"""
-    service = EvaluationService(db)
-    metrics = []
+    """
+    获取评估指标列表
     
-    # 如果指定了类型，则只返回该类型的指标
-    if type:
-        metrics_dict = service.get_metrics_by_type(type)
+    可以通过type参数筛选指标类型:
+    - prompt: 提示词评估指标
+    - rag: RAG评估指标
+    - custom: 自定义评估指标
+    - 不提供则返回所有指标
+    """
+    try:
+        service = EvaluationService(db)
         
-        # 添加指标
-        for metric_id, metric_info in metrics_dict.items():
-            metrics.append(
-                Metric(id=metric_id, name=metric_info["name"], description=metric_info["description"])
-            )
+        if type:
+            # 获取指定类型的指标
+            metrics_dict = service.get_metrics_by_type(type)
+        else:
+            # 获取所有指标
+            metrics_dict = service.metrics
         
-        return metrics
-    
-    # 否则按优先级返回所有指标
-    # 优先显示prompt评估指标
-    priority_metrics = ["prompt_scs", "bleu", "answer_relevancy", "faithfulness", "context_relevancy", "context_precision"]
-    
-    # 先添加优先指标
-    for metric_id in priority_metrics:
-        if metric_id in service.metrics:
-            metric_info = service.metrics[metric_id]
-            metrics.append(
-                Metric(id=metric_id, name=metric_info["name"], description=metric_info["description"])
-            )
-    
-    # 添加剩余指标
-    for metric_id, metric_info in service.metrics.items():
-        if metric_id not in priority_metrics:
-            metrics.append(
-                Metric(id=metric_id, name=metric_info["name"], description=metric_info["description"])
-            )
-    
-    return metrics
+        # 转换为接口模型
+        result = []
+        for metric_id, metric_data in metrics_dict.items():
+            result.append(Metric(
+                id=metric_id,
+                name=metric_data["name"],
+                description=metric_data["description"],
+                type=metric_data.get("type")
+            ))
+            
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取评估指标失败: {str(e)}"
+        )
 
 
 @router.get("/tasks", response_model=EvaluationTasksResponse)
@@ -302,11 +309,21 @@ async def run_evaluation_async(
     except Exception as e:
         logger.error(f"评估任务执行失败: {str(e)}")
         # 更新任务状态为失败
-        record = local_db.query(EvaluationRecord).filter_by(id=record_id).first()
-        if record:
-            record.task.status = "failed"
-            record.task.error_message = str(e)
-            local_db.commit()
+        try:
+            record = local_db.query(EvaluationRecord).filter_by(id=record_id).first()
+            if record:
+                # 查询关联的任务
+                task = local_db.query(EvaluationTask).filter_by(id=record.task_id).first()
+                if task:
+                    task.status = "failed"
+                    task.error_message = str(e)
+                    local_db.commit()
+                    logger.info(f"已将任务状态更新为失败")
+                else:
+                    logger.error(f"无法找到任务记录，评估记录ID: {record_id}")
+        except Exception as update_error:
+            logger.error(f"更新任务状态失败: {str(update_error)}")
+            local_db.rollback()
     finally:
         local_db.close()
 
@@ -699,57 +716,52 @@ async def run_evaluation_in_background(
                         })
 
             # 更新评估记录
-            record = local_db.query(EvaluationRecord).filter_by(id=record_id).first()
-            if record:
-                record.results = detailed_results
-                record.task.status = "completed"
-                local_db.commit()
-                logger.success(f"评估记录 {record_id} 完成")
-            else:
-                logger.error(f"评估记录 {record_id} 不存在")
+            try:
+                # 重新查询记录以确保它绑定到当前会话
+                record = local_db.query(EvaluationRecord).filter_by(id=record_id).first()
+                if record:
+                    record.results = detailed_results
+                    # 获取关联的任务对象
+                    task = local_db.query(EvaluationTask).filter_by(id=record.task_id).first()
+                    if task:
+                        task.status = "completed"
+                        local_db.commit()
+                        logger.success(f"评估记录 {record_id} 完成")
+                    else:
+                        logger.error(f"无法找到评估记录 {record_id} 对应的任务")
+                        # 尝试单独更新记录
+                        local_db.commit()
+                else:
+                    logger.error(f"评估记录 {record_id} 不存在")
+            except Exception as update_error:
+                logger.error(f"更新评估记录状态失败: {str(update_error)}")
+                local_db.rollback()
 
     except Exception as e:
         logger.error(f"评估记录 {record_id} 失败: {str(e)}")
         # 更新状态为失败
-        record = local_db.query(EvaluationRecord).filter_by(id=record_id).first()
-        if record:
-            record.task.status = "failed"
-            record.task.error_message = str(e)
-            local_db.commit()
-    finally:
-        # 确保关闭数据库连接
-        local_db.close()
-        
-        # 强制清理所有异步资源
         try:
-            import asyncio
-            # 清理LLM资源
-            if 'chain' in locals() and chain is not None:
-                if hasattr(chain, 'aclose'):
-                    try:
-                        logger.info("关闭chain资源")
-                        asyncio.create_task(chain.aclose())
-                    except Exception as e:
-                        logger.error(f"关闭chain资源失败: {str(e)}")
-
-            # 检查当前事件循环中的所有任务是否完成
-            pending = asyncio.all_tasks()
-            if pending:
-                logger.info(f"等待 {len(pending)} 个待处理任务完成")
-                # 等待所有任务完成，但设置超时
-                try:
-                    done, still_pending = await asyncio.wait(pending, timeout=3.0)
-                    if still_pending:
-                        logger.warning(f"仍有 {len(still_pending)} 个任务未完成，但继续执行")
-                except Exception as e:
-                    logger.error(f"等待任务完成时出错: {str(e)}")
-            
-            # 强制清理内存
-            import gc
-            gc.collect()
-            logger.info("资源清理完成")
-        except Exception as final_e:
-            logger.error(f"最终清理过程出错: {str(final_e)}")
+            # 重新查询记录以确保它绑定到当前会话
+            record = local_db.query(EvaluationRecord).filter_by(id=record_id).first()
+            if record:
+                # 查询关联的任务
+                task = local_db.query(EvaluationTask).filter_by(id=record.task_id).first()
+                if task:
+                    task.status = "failed"
+                    task.error_message = str(e)
+                    local_db.commit()
+                    logger.info(f"已将任务状态更新为失败")
+                else:
+                    logger.error(f"无法找到任务记录，评估记录ID: {record_id}")
+        except Exception as update_error:
+            logger.error(f"更新任务状态失败: {str(update_error)}")
+            local_db.rollback()
+    finally:
+        # 确保关闭会话
+        try:
+            local_db.close()
+        except Exception as close_error:
+            logger.error(f"关闭数据库会话失败: {str(close_error)}")
 
 
 # 增加RAG评估相关的端点
@@ -1323,8 +1335,7 @@ async def create_custom_metric_iteration(
             metric_id=request.custom_metric_id,
             system_prompt=request.system_prompt,
             file_id=task_file.file_id,
-            created_at=get_beijing_time(),
-            status="processing"
+            created_at=get_beijing_time()
         )
         
         # 更新任务状态
@@ -1337,6 +1348,7 @@ async def create_custom_metric_iteration(
         def run_custom_evaluation_in_thread():
             from sqlalchemy.orm import sessionmaker
             from database import engine
+            from database.model.file import FileDB
             import asyncio
             import nest_asyncio
             
@@ -1352,20 +1364,57 @@ async def create_custom_metric_iteration(
                 # 在事件循环中执行异步评估
                 async def run_task():
                     try:
+                        # 使用当前会话重新查询记录，而不是使用原始记录
+                        current_record = local_db.query(EvaluationRecord).filter(
+                            EvaluationRecord.id == record_id
+                        ).first()
+                        
+                        if not current_record:
+                            logger.error(f"无法在新会话中找到记录 {record_id}")
+                            return
+                            
+                        # 重新查询任务和文件，确保它们绑定到当前会话
+                        current_task = local_db.query(EvaluationTask).filter(
+                            EvaluationTask.id == task_id
+                        ).first()
+                        
+                        if not current_task:
+                            logger.error(f"无法在新会话中找到任务 {task_id}")
+                            return
+                            
                         # 获取文件内容
-                        file = local_db.query(FileDB).filter(FileDB.id == task_file.file_id).first()
+                        file = local_db.query(FileDB).filter(FileDB.id == current_record.file_id).first()
                         if not file:
                             raise ValueError("数据文件不存在")
                             
                         file_content = json.loads(file.data.decode('utf-8'))
                         
-                        await run_evaluation_async(
+                        # 使用run_evaluation_in_background函数而不是run_evaluation_async
+                        await run_evaluation_in_background(
                             db=local_db,
                             record_id=record_id,
-                            file_id=str(task_file.file_id),
+                            file_content=file_content,
                             metric_id=request.custom_metric_id,
                             system_prompt=request.system_prompt
                         )
+                    except Exception as e:
+                        logger.error(f"自定义评估任务执行失败: {str(e)}")
+                        # 更新任务状态为失败 - 重新查询记录和任务
+                        try:
+                            # 重新查询记录和任务以确保它们绑定到当前会话
+                            task_to_update = local_db.query(EvaluationTask).filter(
+                                EvaluationTask.id == task_id
+                            ).first()
+                            
+                            if task_to_update:
+                                task_to_update.status = "failed"
+                                task_to_update.error_message = str(e)
+                                local_db.commit()
+                                logger.info(f"已将任务 {task_id} 状态更新为失败")
+                            else:
+                                logger.error(f"无法更新任务状态: 任务 {task_id} 未找到")
+                        except Exception as update_error:
+                            logger.error(f"更新任务状态失败: {str(update_error)}")
                     finally:
                         pass
                 
@@ -1373,6 +1422,15 @@ async def create_custom_metric_iteration(
                 loop.run_until_complete(run_task())
             except Exception as e:
                 print(f"自定义评估线程出错: {str(e)}")
+                # 尝试更新任务状态
+                try:
+                    task_record = local_db.query(EvaluationTask).filter_by(id=task_id).first()
+                    if task_record:
+                        task_record.status = "failed"
+                        task_record.error_message = f"评估线程错误: {str(e)}"
+                        local_db.commit()
+                except Exception as inner_e:
+                    print(f"更新任务状态失败: {str(inner_e)}")
             finally:
                 try:
                     loop.run_until_complete(loop.shutdown_asyncgens())
