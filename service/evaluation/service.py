@@ -294,6 +294,47 @@ class EvaluationService:
             }
         }
 
+        # 加载自定义指标
+        self._load_custom_metrics()
+
+    # 添加加载自定义指标的方法
+    def _load_custom_metrics(self):
+        """从数据库加载自定义评估指标"""
+        try:
+            # 尝试从数据库加载自定义指标
+            try:
+                # 尝试导入自定义指标模型
+                from database.model.evaluation import CustomMetric
+                custom_metrics_exist = True
+            except ImportError:
+                # 如果导入失败，记录警告日志
+                logger.warning("CustomMetric 模型不存在，暂时无法加载自定义指标")
+                custom_metrics_exist = False
+            
+            # 只有在 CustomMetric 存在时才尝试查询
+            if custom_metrics_exist:
+                custom_metrics = self.db.query(CustomMetric).all()
+                for metric in custom_metrics:
+                    metric_id = f"custom_{metric.id}"
+                    self.metrics[metric_id] = {
+                        "id": metric_id,
+                        "name": metric.name,
+                        "description": metric.description,
+                        "implementation": "custom_metric_evaluation",
+                        "type": "custom",
+                        "criteria": metric.criteria,
+                        "instruction": metric.instruction,
+                        "scale": metric.scale,
+                        "custom_type": metric.type  # 'custom' 或 'rubrics'
+                    }
+                
+                logger.info(f"已加载 {len(custom_metrics)} 个自定义评估指标")
+            else:
+                logger.info("跳过加载自定义指标")
+                
+        except Exception as e:
+            logger.error(f"加载自定义指标失败: {str(e)}")
+
     # 添加用于获取特定类型指标的方法
     def get_metrics_by_type(self, metric_type):
         """获取指定类型的评估指标"""
@@ -321,7 +362,7 @@ class EvaluationService:
                     # 使用BLEU评估
                     scores = self._evaluate_with_bleu(answers, generated_responses)
                     result_scores[metric_name] = scores
-                
+                    
                 elif implementation == "custom_relevancy_scoring" and generated_responses:
                     # 使用自定义答案相关性评估
                     scores = await self._evaluate_relevancy(questions, generated_responses)
@@ -948,3 +989,57 @@ class EvaluationService:
                 scores.append(round(np.random.uniform(0.7, 0.95), 2))
                 
         return scores
+
+    # 添加创建自定义指标的方法
+    async def create_custom_metric(self, user_id: UUID, metric_definition):
+        """创建新的自定义评估指标"""
+        try:
+            # 尝试导入自定义指标模型
+            try:
+                from database.model.evaluation import CustomMetric
+            except ImportError:
+                # 如果模型不存在，需要先创建模型
+                logger.error("CustomMetric 模型不存在，无法创建自定义指标")
+                raise ValueError("自定义指标功能尚未准备好，请联系管理员")
+
+            import uuid
+
+            # 创建自定义指标记录
+            new_metric = CustomMetric(
+                id=uuid.uuid4(),
+                user_id=user_id,
+                name=metric_definition.name,
+                description=metric_definition.description,
+                criteria=metric_definition.criteria,
+                instruction=metric_definition.instruction,
+                scale=metric_definition.scale,
+                type=metric_definition.type,
+                created_at=get_beijing_time()
+            )
+
+            self.db.add(new_metric)
+            self.db.commit()
+
+            # 添加到内存中的指标集合
+            metric_id = f"custom_{new_metric.id}"
+            self.metrics[metric_id] = {
+                "id": metric_id,
+                "name": new_metric.name,
+                "description": new_metric.description,
+                "implementation": "custom_metric_evaluation",
+                "type": "custom",
+                "criteria": new_metric.criteria,
+                "instruction": new_metric.instruction,
+                "scale": new_metric.scale,
+                "custom_type": new_metric.type
+            }
+
+            return {
+                "metric_id": metric_id,
+                "name": new_metric.name
+            }
+
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"创建自定义指标失败: {str(e)}")
+            raise ValueError(f"创建自定义指标失败: {str(e)}")

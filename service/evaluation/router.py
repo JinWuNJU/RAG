@@ -1203,3 +1203,196 @@ async def run_rag_evaluation_async(
             local_db.commit()
     finally:
         local_db.close()
+
+
+# 添加创建自定义评估指标的接口
+@router.post("/custom_metrics", response_model=CustomMetricCreateResponse)
+async def create_custom_metric(
+    request: CustomMetricRequest,
+    Authorize: AuthJWT = Depends(),
+    db: Session = Depends(get_db)
+):
+    """
+    创建自定义评估指标
+    
+    用户可以定义自己的评估标准，用于评估生成内容
+    """
+    try:
+        Authorize.jwt_required()
+        user_id = decode_jwt_to_uid(Authorize)
+
+        service = EvaluationService(db)
+        result = await service.create_custom_metric(user_id, request.metric_definition)
+        
+        return CustomMetricCreateResponse(
+            metric_id=result["metric_id"],
+            name=result["name"]
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"创建自定义评估指标失败: {str(e)}"
+        )
+
+# 获取自定义评估指标列表
+@router.get("/custom_metrics", response_model=List[Metric])
+async def get_custom_metrics(
+    Authorize: AuthJWT = Depends(),
+    db: Session = Depends(get_db)
+):
+    """获取当前用户的自定义评估指标"""
+    try:
+        Authorize.jwt_required()
+        user_id = decode_jwt_to_uid(Authorize)
+        
+        service = EvaluationService(db)
+        metrics = service.get_metrics_by_type("custom")
+        
+        # 转换为接口模型
+        result = []
+        for metric_id, metric_data in metrics.items():
+            result.append(Metric(
+                id=metric_id,
+                name=metric_data["name"],
+                description=metric_data["description"],
+                type="custom"
+            ))
+            
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取自定义评估指标失败: {str(e)}"
+        )
+
+# 添加使用自定义指标进行评估的接口
+@router.post("/custom_iterations", response_model=EvaluationIterationResponse)
+async def create_custom_metric_iteration(
+    request: CustomMetricEvaluationRequest,
+    Authorize: AuthJWT = Depends(),
+    db: Session = Depends(get_db)
+):
+    """使用自定义评估指标创建新的评估迭代"""
+    try:
+        Authorize.jwt_required()
+        user_id = decode_jwt_to_uid(Authorize)
+        
+        # 检查任务是否存在且属于当前用户
+        task_id = UUID(request.task_id)
+        task = db.query(EvaluationTask).filter(
+            EvaluationTask.id == task_id,
+            EvaluationTask.user_id == user_id
+        ).first()
+        
+        if not task:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="评估任务不存在或不属于当前用户"
+            )
+            
+        # 检查自定义指标是否存在
+        service = EvaluationService(db)
+        if request.custom_metric_id not in service.metrics:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="自定义评估指标不存在"
+            )
+            
+        # 获取任务的文件ID
+        task_file = db.query(EvaluationRecord).filter(
+            EvaluationRecord.task_id == task_id
+        ).order_by(
+            EvaluationRecord.created_at.desc()
+        ).first()
+        
+        if not task_file or not task_file.file_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="无法找到任务的数据文件"
+            )
+            
+        # 创建新的评估记录
+        record_id = uuid.uuid4()
+        new_record = EvaluationRecord(
+            id=record_id,
+            task_id=task_id,
+            metric_id=request.custom_metric_id,
+            system_prompt=request.system_prompt,
+            file_id=task_file.file_id,
+            created_at=get_beijing_time(),
+            status="processing"
+        )
+        
+        # 更新任务状态
+        task.status = "processing"
+        
+        db.add(new_record)
+        db.commit()
+        
+        # 启动后台评估任务
+        def run_custom_evaluation_in_thread():
+            from sqlalchemy.orm import sessionmaker
+            from database import engine
+            import asyncio
+            import nest_asyncio
+            
+            # 为当前线程创建独立的事件循环
+            LocalSession = sessionmaker(bind=engine)
+            local_db = LocalSession()
+            try:
+                # 防止嵌套事件循环问题
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                nest_asyncio.apply(loop)
+                
+                # 在事件循环中执行异步评估
+                async def run_task():
+                    try:
+                        # 获取文件内容
+                        file = local_db.query(FileDB).filter(FileDB.id == task_file.file_id).first()
+                        if not file:
+                            raise ValueError("数据文件不存在")
+                            
+                        file_content = json.loads(file.data.decode('utf-8'))
+                        
+                        await run_evaluation_async(
+                            db=local_db,
+                            record_id=record_id,
+                            file_id=str(task_file.file_id),
+                            metric_id=request.custom_metric_id,
+                            system_prompt=request.system_prompt
+                        )
+                    finally:
+                        pass
+                
+                # 运行异步任务
+                loop.run_until_complete(run_task())
+            except Exception as e:
+                print(f"自定义评估线程出错: {str(e)}")
+            finally:
+                try:
+                    loop.run_until_complete(loop.shutdown_asyncgens())
+                    loop.close()
+                except Exception as e:
+                    print(f"关闭事件循环失败: {str(e)}")
+                local_db.close()
+        
+        # 启动真正后台运行的线程
+        eval_thread = threading.Thread(target=run_custom_evaluation_in_thread)
+        eval_thread.daemon = True
+        eval_thread.start()
+        
+        return EvaluationIterationResponse(record_id=str(record_id))
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"创建自定义指标评估迭代失败: {str(e)}"
+        )
