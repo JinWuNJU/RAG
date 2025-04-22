@@ -1,3 +1,4 @@
+import asyncio
 import os
 from typing import List, Optional
 import numpy as np
@@ -43,22 +44,37 @@ class EmbeddingService:
 
     async def embed_batch(self, texts: List[str]) -> List[Optional[np.ndarray]]:
         """
-        批量生成1536维的嵌入向量
+        批量生成1536维的嵌入向量（通过逐个调用embed_text实现）
         :param texts: 文本列表
         :return: 嵌入向量列表
         """
         if not texts:
             return []
 
-        try:
-            # 处理查询文本
+        # 使用asyncio.gather并发调用embed_text
+        embeddings = await asyncio.gather(
+            *(self.embed_text(text) for text in texts)
+        )
+        return embeddings
 
-            resp = await self.client.embeddings.create(
-                model=self.model_name,
-                input=texts
-            )
-
-            return [self._normalize_and_slice(item.embedding) for item in resp.data]
-        except Exception as e:
-            logger.error(f"批量生成嵌入向量失败: {str(e)}")
-            return [None] * len(texts)
+    # async def embed_batch(self, texts: List[str]) -> List[Optional[np.ndarray]]:
+    #     """
+    #     批量生成1536维的嵌入向量
+    #     :param texts: 文本列表
+    #     :return: 嵌入向量列表
+    #     """
+    #     if not texts:
+    #         return []
+    #
+    #     try:
+    #         # 处理查询文本
+    #
+    #         resp = await self.client.embeddings.create(
+    #             model=self.model_name,
+    #             input=texts
+    #         )
+    #
+    #         return [self._normalize_and_slice(item.embedding) for item in resp.data]
+    #     except Exception as e:
+    #         logger.error(f"批量生成嵌入向量失败: {str(e)}")
+    #         return [None] * len(texts)
