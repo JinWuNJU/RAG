@@ -25,9 +25,10 @@ variables:
   #DOCKER_HOST: tcp://docker:2375
   #DOCKER_TLS_CERTDIR: ""
 
-  SERVER_IP: "172.29.4.37"
-  SERVER_USER: "ubuntu"
-  DEPLOY_PATH: "/home/ubuntu/ragbackend"
+  # SERVER_IP: "172.29.4.37"
+  # SERVER_USER: "ubuntu"
+  # DEPLOY_PATH: "/home/gitlab-runner/ragbackend"
+    DEPLOY_PATH: "/home/ubuntu"
 
 
 #services:
@@ -36,59 +37,69 @@ variables:
 #    command: ["--tls=false"]
 
 # build-job:       # This job runs in the build stage, which runs first.
-#  stage: build
-#  image: docker:latest
-#  services:
-#    - docker:dind
-#  script:
-#   #  - docker info
-#   - export DOCKER_HOST=tcp://172.29.4.37:2375
-#   - docker build -t $DOCKER_IMAGE:$DOCKER_TAG .
-#   - docker save -o $DOCKER_IMAGE.tar $DOCKER_IMAGE:$DOCKER_TAG
-#   - gzip ${DOCKER_IMAGE}.tar
-#   - split -b 100m ${DOCKER_IMAGE}.tar.gz ${DOCKER_IMAGE}_part_
-#  artifacts:
-#    paths:
-#      - ${DOCKER_IMAGE}_part_*
+#   stage: build
+#   tags:
+#     - ragback
+#   script:
+#     - pip install --cache-dir .pip-cache -r requirements.txt
+#   cache:
+#     paths:
+#       - .pip-cache/
+
+
+
+  #  - docker info
+  # - export DOCKER_HOST=tcp://172.29.4.37:2375
+  # - docker build -t $DOCKER_IMAGE:$DOCKER_TAG .
+  # - docker save -o $DOCKER_IMAGE.tar $DOCKER_IMAGE:$DOCKER_TAG
+  # - gzip ${DOCKER_IMAGE}.tar
+  # - split -b 100m ${DOCKER_IMAGE}.tar.gz ${DOCKER_IMAGE}_part_
+  # artifacts:
+  #  paths:
+  #    - ${DOCKER_IMAGE}_part_*
 
 
 
 deploy-job:      # This job runs in the deploy stage.
   stage: deploy  # It only runs when *both* jobs in the test stage complete successfully.
-  # script:
+  tags:
+    - ragback
+  script:
+    - cd $DEPLOY_PATH
+    - bash deploy-srv.sh
+    # - sudo pkill -f "make server"
+    # - git clone http://172.29.4.49/2025seiii-ThunderForce/ragbackend.git $DEPLOY_PATH
+    # - cd $DEPLOY_PATH
+    # - python3 -m venv .venv
+    # - source .venv/bin/activate
+    # - pip install -r requirements.txt
+    # #- sudo chown -R $SERVER_USER:$SERVER_USER $DEPLOY_PATH
+    # - nohup make server > /dev/null 2>&1
     # - export DOCKER_HOST=tcp://172.29.4.37:2375
     # - docker load -i ${DOCKER_IMAGE}.tar
     # - docker run -d --name ${DOCKER_IMAGE} -p 8080:8080 ${DOCKER_IMAGE}:${DOCKER_TAG}
-  before_script:
+  # before_script:
     # 安装 ssh-agent
-    - 'which ssh-agent || ( apt-get update -y && apt-get install openssh-client -y )'
-    - eval $(ssh-agent -s)
-    #- echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
-    - ldconfig -p | grep libcrypto
-    - mkdir -p ~/.ssh
-    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_rsa
-    - chmod 600 ~/.ssh/id_rsa
-    - ssh-add ~/.ssh/id_rsa
-    - chmod 700 ~/.ssh
-    - ssh-keyscan $SERVER_IP >> ~/.ssh/known_hosts
-    - chmod 644 ~/.ssh/known_hosts
+    # - 'which ssh-agent || ( apt-get update -y && apt-get install openssh-client -y )'
+    # - eval $(ssh-agent -s)
+    # #- echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+    # - ldconfig -p | grep libcrypto
+    # - mkdir -p ~/.ssh
+    # - echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_rsa
+    # - chmod 600 ~/.ssh/id_rsa
+    # - ssh-add ~/.ssh/id_rsa
+    # - chmod 700 ~/.ssh
+    # - ssh-keyscan $SERVER_IP >> ~/.ssh/known_hosts
+    # - chmod 644 ~/.ssh/known_hosts
     
   # environment: production
-  script:
-    - |
-      if ssh ${SERVER_USER}@${SERVER_IP} "pgrep -f 'make server$' > /dev/null"; then
-         ssh ${SERVER_USER}@${SERVER_IP}  "pkill -f 'make server$'"
-      fi
-    # 创建远程目录（如果不存在）
-    - ssh ${SERVER_USER}@${SERVER_IP} "mkdir -p ${DEPLOY_PATH}"
-    - scp -r ./* ${SERVER_USER}@${SERVER_IP}:${DEPLOY_PATH}/
-    - ssh ${SERVER_USER}@${SERVER_IP} "cd ${DEPLOY_PATH} && python3 -m venv myenv && source myenv/bin/activate && pip install -r requirements.txt && make server > /dev/null 2>&1 & disown"
-    # - scp Dockerfile nginx.conf ${SERVER_USER}@${SERVER_IP}:${DEPLOY_PATH}/
-    # - ssh ${SERVER_USER}@${SERVER_IP} "cd ${DEPLOY_PATH} && echo ${PASSWORD} | sudo -S docker build -t $DOCKER_IMAGE:$DOCKER_TAG . && echo ${PASSWORD} -S sudo docker run -d -p 8080:8080 --name $DOCKER_IMAGE $DOCKER_IMAGE:$DOCKER_TAG"
-    # - ssh ${SERVER_USER}@${SERVER_IP} "sudo ;sudo docker load -i ${DEPLOY_PATH}/${DOCKER_IMAGE}.tar"
-  #   - cat ${DOCKER_IMAGE}_part_* > ${DOCKER_IMAGE}.tar
-  #   - scp ${DOCKER_IMAGE}.tar ${SERVER_USER}@${SERVER_IP}:${DEPLOY_PATH}/
-  #   - ssh ${SERVER_USER}@${SERVER_IP} "cd ${DEPLOY_PATH} && echo ${PASSWORD} | sudo -S docker load -i ${DOCKER_IMAGE}.tar && echo ${PASSWORD} | sudo -S docker stop ${DOCKER_IMAGE} && echo ${PASSWORD} | sudo -S docker rm ${DOCKER_IMAGE} && echo ${PASSWORD} | sudo -S docker run -d -p 8000:8000 --network=rag_net --name $DOCKER_IMAGE $DOCKER_IMAGE:$DOCKER_TAG"
-  #   # - ssh ${SERVER_USER}@${SERVER_IP} "sudo docker load -i ${DEPLOY_PATH}/${DOCKER_IMAGE}.tar"
-  # dependencies:
-  #  - build-job
+  # script:
+    # - |
+    #   if ssh ${SERVER_USER}@${SERVER_IP} "pgrep -f 'make server$' > /dev/null"; then
+    #      ssh ${SERVER_USER}@${SERVER_IP}  "pkill -f 'make server$'"
+    #   fi
+    # # 创建远程目录（如果不存在）
+    # - ssh ${SERVER_USER}@${SERVER_IP} "mkdir -p ${DEPLOY_PATH}"
+    # - scp -r ./* ${SERVER_USER}@${SERVER_IP}:${DEPLOY_PATH}/
+    # - ssh ${SERVER_USER}@${SERVER_IP} "cd ${DEPLOY_PATH} && python3 -m venv myenv && source myenv/bin/activate && pip install -r requirements.txt && make server > /dev/null 2>&1 & disown"
+
