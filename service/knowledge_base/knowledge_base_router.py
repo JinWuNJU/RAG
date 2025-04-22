@@ -129,7 +129,9 @@ async def list_knowledge_bases(
                 name=kb.name,
                 description=kb.description,
                 created_at=kb.created_at,
-                status=kb.status
+                status=kb.status,
+                uploader_id=kb.uploader_id,
+                is_public=kb.is_public
             )
             for kb in knowledge_bases
         ]
@@ -191,7 +193,9 @@ async def get_knowledge_base_detail(
             status=kb.status,
             chunk_size=kb.chunk_size,
             overlap_size=kb.overlap_size,
-            hybrid_ratio=kb.hybrid_ratio
+            hybrid_ratio=kb.hybrid_ratio,
+            uploader_id=kb.uploader_id,
+            is_public=kb.is_public
         )
 
     except HTTPException:

@@ -28,6 +28,8 @@ class KnowledgeBaseListItem(KnowledgeBaseBasicInfo):
     """知识库列表项响应模型"""
     created_at: datetime
     status: str  # "building" 或 "completed"
+    uploader_id:UUID
+    is_public: bool
 
     class Config:
         json_encoders = {
@@ -41,6 +43,8 @@ class KnowledgeBaseDetailResponse(BaseModel):
     description: Optional[str]
     created_at: datetime
     status: str  # "building" 或 "completed"
+    uploader_id: UUID
+    is_public: bool
     chunk_size: int
     overlap_size: int
     hybrid_ratio: float
