@@ -84,20 +84,24 @@ MOCKING_CHAT_LEGACY=true or false # 是否使用模拟服务的旧版本，默�
 
 
 # rag对话功能依赖
-CHAT_LLM_MODEL_ID=用于RAG对话的模型ID
+CHAT_LLM_MODEL_ID=用于RAG对话的模型ID, 默认deepseek-v3-250324
 CHAT_LLM_API_KEY=用于RAG对话的API KEY
-CHAT_LLM_API_ENDPOINT=用于RAG对话的API ENDPOINT
+CHAT_LLM_API_ENDPOINT=用于RAG对话的API ENDPOINT, 默认https://ark.cn-beijing.volces.com/api/v3/
 
-TITLE_LLM_MODEL_ID=用于生成对话标题的模型ID
+TITLE_LLM_MODEL_ID=用于生成对话标题的模型ID, 默认glm-4-flash-250414
 TITLE_LLM_API_KEY=用于生成对话标题的API KEY
-TITLE_LLM_API_ENDPOINT=用于生成对话标题的API ENDPOINT
+TITLE_LLM_API_ENDPOINT=用于生成对话标题的API ENDPOINT, 默认https://open.bigmodel.cn/api/paas/v4/
 
-EMB_MODEL_ID=用于获取文本嵌入的模型ID
+EMB_MODEL_ID=用于获取文本嵌入的模型ID，默认doubao-embedding-text-240715
 EMB_API_ENDPOINT=用于获取文本嵌入的API ENDPOINT
-EMB_API_KEY=用于获取文本嵌入的API KEY
+EMB_API_KEY=用于获取文本嵌入的API KEY，默认https://ark.cn-beijing.volces.com/api/v3/
 
 ZHIPU_API_KEY=智谱AI API KEY
 ```
+
+##  数据库表结构升级
+使用alembic进行数据库表结构升级，通过读取环境变量中的DB_*配置，连接到数据库。
+更改ORM模型后，自行生成迁移文件，执行迁移，并将迁移文件提交到代码库。
 
 ##  部署
 

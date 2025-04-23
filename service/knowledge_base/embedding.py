@@ -11,8 +11,8 @@ class EmbeddingService:
         """
         初始化ARK嵌入服务，输出维度调整为1536
         """
-        self.client = AsyncOpenAI(api_key=os.environ.get("EMB_API_KEY"), base_url=os.environ.get("EMB_API_ENDPOINT"))
-        self.model_name = os.environ.get("EMB_MODEL_ID", "")  # 原始模型输出2560维
+        self.client = AsyncOpenAI(api_key=os.environ.get("EMB_API_KEY"), base_url=os.environ.get("EMB_API_ENDPOINT", "https://ark.cn-beijing.volces.com/api/v3/"))
+        self.model_name = os.environ.get("EMB_MODEL_ID", "doubao-embedding-text-240715")  # 原始模型输出2560维
         self.target_dim = 1536  # 目标维度
         # logger.info(f"初始化ARK嵌入服务，模型: {self.model_name}，目标维度: {self.target_dim}")
 
