@@ -240,15 +240,16 @@ class EvaluationService:
         self.prompt_evaluator = None
         
         try:
-            api_key = os.getenv("ZHIPU_API_KEY")
-            base_url = "https://open.bigmodel.cn/api/paas/v4/"
+            api_key = os.getenv("EVAL_LLM_API_KEY")
+            base_url = os.getenv("EVAL_LLM_API_ENDPOINT", "https://open.bigmodel.cn/api/paas/v4/")
+            model_id = os.getenv("EVAL_LLM_MODEL_ID", "glm-4-flash-250414")
             self.prompt_evaluator = SimplePromptEvaluator(api_key, base_url)
             
             from langchain_community.chat_models import ChatOpenAI
             self.llm = ChatOpenAI(
                 base_url=base_url,
                 api_key=api_key,
-                model="glm-4-flash"
+                model=model_id
             )
         except ImportError:
             logger.warning("无法导入LLM相关依赖，将使用模拟数据")

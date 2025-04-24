@@ -82,8 +82,6 @@ DB_PASS=数据库密码
 MOCKING_CHAT=true or false # 是否使用模拟llm聊天服务，默认true
 MOCKING_CHAT_LEGACY=true or false # 是否使用模拟服务的旧版本，默认false（新版本模拟了实际llm聊天的api，前端自4fe856d6起支持）
 
-
-# rag对话功能依赖
 CHAT_LLM_MODEL_ID=用于RAG对话的模型ID, 默认deepseek-v3-250324
 CHAT_LLM_API_KEY=用于RAG对话的API KEY
 CHAT_LLM_API_ENDPOINT=用于RAG对话的API ENDPOINT, 默认https://ark.cn-beijing.volces.com/api/v3/
@@ -96,8 +94,10 @@ EMB_MODEL_ID=用于获取文本嵌入的模型ID，默认doubao-embedding-text-2
 EMB_API_ENDPOINT=用于获取文本嵌入的API ENDPOINT
 EMB_API_KEY=用于获取文本嵌入的API KEY，默认https://ark.cn-beijing.volces.com/api/v3/
 
-ZHIPU_API_KEY=智谱AI API KEY
-```
+EVAL_LLM_MODEL_ID=用于评估的模型ID，默认glm-4-flash-250414
+EVAL_LLM_API_KEY=用于评估的API KEY
+EVAL_LLM_API_ENDPOINT=用于评估的API ENDPOINT, 默认https://open.bigmodel.cn/api/paas/v4/
+
 
 ##  数据库表结构升级
 使用alembic进行数据库表结构升级，通过读取环境变量中的DB_*配置，连接到数据库。
