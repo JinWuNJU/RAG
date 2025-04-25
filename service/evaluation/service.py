@@ -258,38 +258,38 @@ class EvaluationService:
         self.metrics = {
             "answer_relevancy": {
                 "name": "答案相关性",
-                "description": "衡量答案与问题的相关程度",
+                "description": "评估答案是否直接回应了用户问题，并提供相关信息而不包含无关内容。高分表示答案针对性强且高度相关。",
                 "implementation": "custom_relevancy_scoring",
                 "type": "prompt"  # 标记为prompt评估指标
             },
             "prompt_scs": {
                 "name": "Prompt调优评分",
-                "description": "由LLM评判生成答案与参考答案的相似度",
+                "description": "使用AI评判模型综合评价生成答案的质量，考虑准确性、完整性、相关性和清晰度。适合评估Prompt优化效果。",
                 "implementation": "custom_prompt_scoring",
                 "type": "prompt"
             },
             "bleu": {
-                "name": "BLEU分数",
-                "description": "计算生成答案与参考答案的文本相似度",
+                "name": "BLEU文本相似度",
+                "description": "通过N-gram匹配计算生成答案与参考答案的文本相似度。适合客观评估文本生成质量和与标准答案的一致性。",
                 "implementation": "bleu_scoring",
                 "type": "prompt"
             },
             # RAG评估指标
             "faithfulness": {
                 "name": "忠实度",
-                "description": "评估答案是否忠实于被召回的上下文",
+                "description": "评估生成答案是否忠实于检索到的上下文，检测是否存在'幻觉'(虚构信息)。高分表示答案内容可在上下文中得到支持。",
                 "implementation": "rag_faithfulness",
                 "type": "rag"  # 标记为RAG评估指标
             },
             "context_relevancy": {
                 "name": "上下文相关性",
-                "description": "评估召回的上下文与查询的相关程度",
+                "description": "评估检索的上下文与用户查询的相关程度，判断上下文是否包含回答问题所需的关键信息。高分表示检索效果好。",
                 "implementation": "rag_context_relevancy",
                 "type": "rag"
             },
             "context_precision": {
                 "name": "上下文精确度",
-                "description": "评估召回的上下文中有用信息的比例",
+                "description": "评估检索上下文中有用信息的比例，检查是否简洁且集中，还是包含大量冗余内容。高分表示检索结果精准高效。",
                 "implementation": "rag_context_precision",
                 "type": "rag"
             }
