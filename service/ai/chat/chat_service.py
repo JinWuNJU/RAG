@@ -398,30 +398,39 @@ class ChatService(BaseChatService):
                     )
                     db.add(user_message)
                     db.commit()
-                else:
-                    # 提供了parentId，表明是追问情况
-                    if parent_message.role != "assistant":
-                        raise HTTPException(
-                            status_code=400,
-                            detail="不正确的ParentId",
-                        )
+                else: # 提供了parentId
+                    # 提取到根消息的路径
+                    trace_list = deque()
                     parent_message_id = parent_message.id
                     for chat in chat_full_list[::-1]:
                         if chat.id == parent_message_id:
-                            chat_trace_list.extendleft(chat.part)
+                            trace_list.appendleft(chat)
                             parent_message_id = chat.parent_id
                             if parent_message_id is None:
                                 break
-                    user_message = ChatMessageDB(
-                        id=uuid.uuid4(),
-                        role="user",
-                        part=[await self._generate_user_message(payload)],
-                        chat_history=history_item,
-                        parent=parent_message
-                    )
-                    db.add(user_message)
-                    history_item.updated_at = datetime.now(tz=timezone.utc)
-                    db.commit()
+                    if parent_message.role == 'assistant': # 追问或编辑提问
+                        # 记录新的提问内容
+                        user_message = ChatMessageDB(
+                            id=uuid.uuid4(),
+                            role="user",
+                            part=[await self._generate_user_message(payload)],
+                            chat_history=history_item,
+                            parent=parent_message
+                        )
+                        db.add(user_message)
+                        history_item.updated_at = datetime.now(tz=timezone.utc)
+                        db.commit()
+                    elif parent_message.role == 'user': # 重新生成回答
+                        # 提取最后一个user message的内容
+                        # 并将它从trace_list中删除，使得ai看到的消息记录不包含重复的提问
+                        user_message: ChatMessageDB = trace_list.pop()
+                        payload.content = ''
+                        for msg in user_message.part:
+                            if msg.kind == 'request':
+                                for part in msg.parts:
+                                    if part.part_kind == 'user-prompt':
+                                        payload.content += str(part.content)
+                        
             # 记录id来提供给聊天sse流
             history_id = history_item.id
             user_message_id = user_message.id
