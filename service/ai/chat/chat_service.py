@@ -4,7 +4,7 @@ import uuid
 from collections import deque
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from typing import List
+from typing import Deque, List
 
 from fastapi import BackgroundTasks, HTTPException
 from fastapi.logger import logger
@@ -352,7 +352,7 @@ class ChatService(BaseChatService):
             is_create_new_chat = False
             history_item = None
             parent_message = None
-            chat_trace_list: deque[ModelMessage] = deque()
+            msg_part_list: deque[ModelMessage] = deque()
 
             if payload.chatId is not None:
                 history_item: ChatHistoryDB | None = db.query(ChatHistoryDB).get(payload.chatId)
@@ -400,11 +400,11 @@ class ChatService(BaseChatService):
                     db.commit()
                 else: # 提供了parentId
                     # 提取到根消息的路径
-                    trace_list = deque()
+                    chat_path: Deque[ChatMessageDB] = deque()
                     parent_message_id = parent_message.id
                     for chat in chat_full_list[::-1]:
                         if chat.id == parent_message_id:
-                            trace_list.appendleft(chat)
+                            chat_path.appendleft(chat)
                             parent_message_id = chat.parent_id
                             if parent_message_id is None:
                                 break
@@ -423,13 +423,15 @@ class ChatService(BaseChatService):
                     elif parent_message.role == 'user': # 重新生成回答
                         # 提取最后一个user message的内容
                         # 并将它从trace_list中删除，使得ai看到的消息记录不包含重复的提问
-                        user_message: ChatMessageDB = trace_list.pop()
+                        user_message: ChatMessageDB = chat_path.pop()
                         payload.content = ''
                         for msg in user_message.part:
                             if msg.kind == 'request':
                                 for part in msg.parts:
                                     if part.part_kind == 'user-prompt':
                                         payload.content += str(part.content)
+                    for chat in chat_path:
+                        msg_part_list.extend(chat.part)
                         
             # 记录id来提供给聊天sse流
             history_id = history_item.id
@@ -447,7 +449,7 @@ class ChatService(BaseChatService):
             payload=payload, 
             history_id=history_id,
             user_message_id=user_message_id,
-            chat_trace_list=chat_trace_list,
+            chat_trace_list=msg_part_list,
             generate_title=is_create_new_chat,
             background_tasks=background_tasks,
             knowledge_base=knowledge_base_VOs
