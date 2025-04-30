@@ -1,4 +1,3 @@
-
 stages:          # List of stages for jobs, and their order of execution
   # - build
   - deploy
@@ -14,6 +13,6 @@ deploy-job:      # This job runs in the deploy stage.
     - ragback
   script:
     #- cd $DEPLOY_PATH
-    - sudo /usr/bin/bash ${DEPLOY_PATH}/deploy-srv.sh
+    - sudo -E /usr/bin/bash ${DEPLOY_PATH}/deploy-srv.sh
 
 
