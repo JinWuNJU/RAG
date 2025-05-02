@@ -16,6 +16,8 @@ deploy-job:      # This job runs in the deploy stage.
     - echo "Creating deployment directory..."
     - sudo mkdir -p $DEPLOY_DIR
     - sudo chown -R $APP_USER:$APP_USER $DEPLOY_DIR
+    - echo "Copying project files..."
+    - cp -r $CI_PROJECT_DIR/* $DEPLOY_DIR/
     - echo "Creating and activating virtual environment..."
     - cd $DEPLOY_DIR
     - python3 -m venv .venv
