@@ -3,16 +3,23 @@ stages:          # List of stages for jobs, and their order of execution
   - deploy
 
 variables:
-    DEPLOY_PATH: "/home/ubuntu"
-
-
+    DEPLOY_DIR: "/home/gitlab-runner/ragbackend"
+    APP_USER: "gitlab-runner"
 
 deploy-job:      # This job runs in the deploy stage.
   stage: deploy  # It only runs when *both* jobs in the test stage complete successfully.
   tags:
     - ragback
   script:
-    #- cd $DEPLOY_PATH
-    - sudo -E /usr/bin/bash ${DEPLOY_PATH}/deploy-srv.sh
+    - echo "Stopping old server..."
+    - if pgrep -f "uvicorn server" > /dev/null; then pkill -f "uvicorn server"; else echo "No old server process found."; fi
+    - echo "Creating and activating virtual environment..."
+    - cd $DEPLOY_DIR
+    - python3 -m venv .venv
+    - source .venv/bin/activate
+    - pip install -r requirements.txt
+    - echo "Starting new server..."
+    - nohup uvicorn server:app --host 0.0.0.0 --port 8000 --reload > server.log 2>&1 &
+
 
 
