@@ -1,4 +1,3 @@
-import asyncio
 from typing import List
 
 import numpy as np
@@ -14,6 +13,18 @@ from service.knowledge_base.embedding import EmbeddingService
 
 
 class TextFileProcessor:
+    
+    # 定义分割符优先级（可调整）
+    SPLITTERS = [
+        '\n\n',  # 段落分隔最高优先级
+        '\n',  # 换行次之
+        '。', '！', '？',  # 中文句子结束符
+        '. ', '! ', '? ',  # 英文句子结束符（注意带空格）
+        '；', '; ',  # 分号
+        '，', ', ',  # 逗号
+        ' ',  # 空格（最后的选择）
+    ]
+    
     def __init__(self, db: Session):
         self.db = db
         self.embedding_service = EmbeddingService()
@@ -92,89 +103,100 @@ class TextFileProcessor:
             logger.error(f"生成嵌入向量时出错: {str(e)}")
             return [None] * len(chunks)
 
-    def _chunk_text(self, text: str, chunk_size: int, overlap_size: int) -> List[str]:
-        """文本分块（改进版）
-        - 主分块尽可能接近 chunk_size（按标点切分）
-        - 重叠部分也按标点切分且长度 ≥ overlap_size
-        - 避免产生过小的分块
+    def _find_split_point(self, text: str, start: int, end: int) -> Optional[int]:
         """
-        # 预处理：标准化空白字符但保留段落分隔
-        text = re.sub(r'([^\n])\n([^\n])', r'\1 \2', text)  # 单换行变空格
+        在text的[start, end)范围内寻找合理的分割点
+        规则：先从后向前寻找常见标点符号），如果找到则返回切分位置（切分点在标点后）
+        如果没有找到，则返回None
+        """
+        # 定义标点（注意顺序不必与参考代码完全相同）
+        punctuations = ['\n\n', '\n', '。', '！', '？', '. ', '! ', '? ', '；', '; ', '，', ', ', ' ']
+        # 从标点列表中顺序寻找第一个匹配项（从后往前）
+        for p in punctuations:
+            idx = text.rfind(p, start, end)
+            if idx != -1 and idx >= start:
+                # 返回标点后的位置作为合理切分点
+                return idx + len(p)
+        return None
+    
+    def _chunk_text(self, text: str, chunk_size: int, overlap_size: int) -> List[str]:
+        """
+        将文本根据预期分块长度(chunk_size)和重叠长度(overlap_size)进行切分。
+        
+        向后搜索切分点阶段：
+        1. 每个分块至少为chunk_size的80%，在[pos + 0.8 * chunk_size, pos + chunk_size)范围内利用_find_split_point寻找合理切分点；
+           若找不到，则采用完整的chunk_size作为分界直到文本末尾。
+        2. 如果最后一块不足目标长度的80%，则将最后两块合并，在合并块中[0.45, 0.55]区间内寻找合理切分点，
+           未找到则直接采用中点切分。
+        
+        向前搜索重叠点阶段：
+        对除首块外的每一块，向前检测前一块的末尾，在20%误差范围内寻找理想的切分位置，以获取更自然的重叠文本，
+        如果找不到，则直接定长切割。
+        """
+        # 预处理：标准化空白字符，但保留段落分隔
+        text = re.sub(r'([^\n])\n([^\n])', r'\1 \2', text)  # 单换行合并成空格
         text = re.sub(r'[ \t]+', ' ', text)  # 合并连续空白
 
         chunks = []
         pos = 0
         len_text = len(text)
+        threshold = 0.8 # 允许切分出最小 80% * chunk_size 的块
 
-        # 定义分割符优先级（可调整）
-        SPLITTERS = [
-            '\n\n',  # 段落分隔最高优先级
-            '\n',  # 换行次之
-            '。', '！', '？',  # 中文句子结束符
-            '. ', '! ', '? ',  # 英文句子结束符（注意带空格）
-            '；', '; ',  # 分号
-            '，', ', ',  # 逗号
-            ' ',  # 空格（最后的选择）
-        ]
-
+        # 向后搜索阶段：从文本前向后切分
         while pos < len_text:
-            # 1. 确定主分块结束点（尽可能接近 chunk_size）
-            chunk_end = min(pos + chunk_size, len_text)
+            expected_end = min(pos + chunk_size, len_text)
+            lower_bound = pos + int(chunk_size * threshold)
+            if lower_bound >= len_text:
+                # 如果剩余文本不足threshold * chunk_size，则将剩余部分作为一个块退出循环
+                chunks.append(text[pos:].strip())
+                break
+            upper_bound = expected_end
 
-            # 查找最佳分割点（按优先级）
-            split_pos = None
-            for splitter in SPLITTERS:
-                # 从后向前找最后一个分割符
-                candidate = text.rfind(splitter, pos, chunk_end)
-                if candidate > pos and (split_pos is None or candidate > split_pos):
-                    split_pos = candidate + len(splitter)
-                    # 如果找到足够大的分块（至少 chunk_size/2），可以提前终止
-                    if split_pos - pos >= chunk_size * 0.5:
-                        break
+            # 尝试在指定范围内寻找合理切分点
+            split_point = self._find_split_point(text, lower_bound, upper_bound)
+            if split_point is None:
+                # 如果未找到，直接在预期长度处分割
+                split_point = expected_end
 
-            # 如果找不到合适分割点或分块过小，尝试向前扩展
-            if split_pos is None or (split_pos - pos) < chunk_size * 0.3:
-                # 允许稍微超过 chunk_size 以找到合适的分割点
-                chunk_end = min(pos + int(chunk_size * 1.5), len_text)
-                for splitter in SPLITTERS:
-                    candidate = text.rfind(splitter, pos, chunk_end)
-                    if candidate > pos:
-                        split_pos = candidate + len(splitter)
-                        break
-
-            # 最终确定主分块结束点
-            chunk_end = split_pos if split_pos is not None else min(pos + chunk_size, len_text)
-
-            # 2. 确定重叠开始点（确保 ≥ overlap_size 且按标点切分）
-            overlap_start = max(pos, chunk_end - overlap_size * 2)  # 搜索范围扩大
-
-            # 在重叠区域内查找分割点
-            overlap_pos = None
-            for splitter in SPLITTERS:
-                candidate = text.find(splitter, overlap_start, chunk_end)
-                if candidate != -1 and (chunk_end - candidate) >= overlap_size:
-                    overlap_pos = candidate + len(splitter)
-                    break
-
-            # 最终确定重叠开始点
-            next_pos = overlap_pos if overlap_pos is not None else max(pos, chunk_end - overlap_size)
-
-            # 3. 添加分块（确保非空且足够大）
-            chunk = text[pos:chunk_end].strip()
-            if chunk and (not chunks or not self._is_redundant(chunk, chunks[-1], overlap_size)):
+            # 截取当前分块并清理空白
+            chunk = text[pos:split_point].strip()
+            if chunk:
                 chunks.append(chunk)
+            pos = split_point  # 更新当前起始位置
 
-            # 4. 更新位置（确保前进）
-            pos = max(next_pos, pos + chunk_size // 2)  # 至少前进50%块长度
+        # 最后一块检查：如果最后一个块不足目标长度threshold * chunk_size且存在前面块，则尝试合并最后两块重新切分
+        if len(chunks) >= 2 and len(chunks[-1]) < (chunk_size * threshold):
+            combined = chunks[-2] + " " + chunks[-1]
+            lower_bound_comb = int(len(combined) * 0.45)
+            upper_bound_comb = int(len(combined) * 0.55)
+            new_split = self._find_split_point(combined, lower_bound_comb, upper_bound_comb)
+            if new_split is None:
+                # 未找到合理切分点则直接取中间位置
+                new_split = len(combined) // 2
+            # 更新最后两块为重新分割后的两部分
+            chunks[-2] = combined[:new_split].strip()
+            chunks[-1] = combined[new_split:].strip()
 
-        return chunks
-
-    def _is_redundant(self,new_chunk: str, last_chunk: str, overlap: int) -> bool:
-        """检查新块是否与上一块尾部过度重复"""
-        if overlap <= 0:
-            return False
-        overlap_part = last_chunk[-overlap:]
-        return new_chunk.startswith(overlap_part) and len(new_chunk) <= overlap * 1.5
+        # 向前搜索重叠点阶段：对除首块外的块进行合理的重叠调整
+        adjusted_chunks = []
+        adjusted_chunks.append(chunks[0])
+        for i in range(1, len(chunks)):
+            prev_chunk = adjusted_chunks[-1]
+            # 理想重叠起始位置：前一块的末尾overlap_size字符
+            ideal_overlap_start = max(0, len(prev_chunk) - overlap_size)
+            # 允许20%误差范围
+            error = int(overlap_size * 0.2)
+            search_lower = max(0, ideal_overlap_start - error)
+            search_upper = min(len(prev_chunk), ideal_overlap_start + error)
+            # 在前一块的指定区域寻找合理切分点
+            split_point = self._find_split_point(prev_chunk, search_lower, search_upper)
+            if split_point is None:
+                split_point = ideal_overlap_start  # 未找到则使用固定位置
+            overlap_text = prev_chunk[split_point:]
+            # 将重叠部分拼接到当前块前面
+            new_chunk = overlap_text + chunks[i]
+            adjusted_chunks.append(new_chunk)
+        return adjusted_chunks
 
     def _save_chunks_with_embeddings(self, kb_id: UUID, file_id: UUID, filename: str,
                                    chunks: List[str], embeddings: List[Optional[np.ndarray]]):
