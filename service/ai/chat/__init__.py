@@ -6,7 +6,6 @@ from fastapi_jwt_auth2 import AuthJWT
 from rest_model.chat.completions import MessagePayload
 from service.ai.chat.chat_service import ChatService
 from service.ai.chat.mock_chat_service import MockChatService
-from service.ai.chat.mock_chat_service_legacy import MockChatServiceLegacy
 from service.ai.chat.service_base import BaseChatService
 from service.user import auth
 
