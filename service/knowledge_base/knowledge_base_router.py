@@ -210,34 +210,26 @@ async def get_knowledge_base_detail(
 
 def get_text_search_results(db: Session, knowledge_base_id: uuid.UUID, query: str, limit: int):
     """使用pgroonga进行全文检索"""
-    # 使用原生SQL确保pgroonga函数调用正确
-    sql = """
-    SELECT id, pgroonga_score(tableoid, ctid) AS score
-    FROM knowledge_base_chunks
-    WHERE knowledge_base_id = :kb_id 
-      AND content &@~ :query
-    ORDER BY score DESC
-    LIMIT :limit
-    """
+    score_expr = text("pgroonga_score(tableoid, ctid) as score")
+    query_expr = text("content &@~ :query")
 
-    # 执行查询获取ID和分数
-    results = db.execute(
-        text(sql),
-        {"kb_id": str(knowledge_base_id), "query": query, "limit": limit}
-    ).fetchall()
+    results = db.query(
+        KnowledgeBaseChunk,
+        score_expr
+    ).filter(
+        KnowledgeBaseChunk.knowledge_base_id == knowledge_base_id,
+        query_expr
+    ).params(query=query).order_by(
+        text("score DESC")
+    ).limit(limit).all()
 
     if not results:
         return []
 
-    # 获取完整的分块对象
-    chunk_ids = [r[0] for r in results]
-    chunks = db.query(KnowledgeBaseChunk).filter(
-        KnowledgeBaseChunk.id.in_(chunk_ids)
-    ).all()
-
-    # 保持原始排序并关联分数
-    chunk_map = {c.id: c for c in chunks}
-    return [(chunk_map[r[0]], float(r[1])) for r in results if r[0] in chunk_map]
+    output = []
+    for chunk, score in results:
+        output.append((chunk, float(score)))
+    return output
 
 
 async def get_vector_search_results(db: Session, knowledge_base_id: uuid.UUID, query: str, limit: int,
@@ -272,8 +264,7 @@ async def get_vector_search_results(db: Session, knowledge_base_id: uuid.UUID, q
 async def hybrid_search(
         knowledge_base_id: str,
         request: SearchRequest,
-        db: Session = Depends(get_db),
-        embedding_service: EmbeddingService = Depends(EmbeddingService)
+        db: Session = Depends(get_db)
 ):
     """混合搜索API（pgroonga全文 + 向量）"""
     try:
@@ -290,7 +281,7 @@ async def hybrid_search(
 
         # 确定混合比例
         hybrid_ratio = kb.hybrid_ratio
-
+        embedding_service = EmbeddingService.get_instance()
         # 并行执行两种搜索
         text_results = get_text_search_results(db, kb_uuid, request.query, request.limit * 2)
         vector_results = await get_vector_search_results(db, kb_uuid, request.query, request.limit * 2, embedding_service)

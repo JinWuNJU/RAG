@@ -9,6 +9,12 @@ from utils.window_ratelimiter import WindowRateLimiter
 
 
 class EmbeddingService:
+    instance = None
+    @classmethod
+    def get_instance(cls):
+        if cls.instance is None:
+            cls.instance = EmbeddingService()
+        return cls.instance
     def __init__(self):
         """
         初始化ARK嵌入服务，输出维度调整为1536

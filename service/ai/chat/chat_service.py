@@ -37,7 +37,6 @@ from service.ai.chat.service_base import BaseChatService
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from service.knowledge_base.embedding import EmbeddingService
 from service.knowledge_base.knowledge_base_router import hybrid_search
 
 
@@ -60,7 +59,9 @@ ChatLLM_Config = LLM_Config(
 对于创作类的问题（如写论文），请务必在正文的段落中引用对应的参考编号，不能只在文章末尾引用。
 你需要解读并概括用户的题目要求，选择合适的格式，充分利用搜索结果并抽取重要信息，生成符合用户要求、极具思想深度、富有创造力与专业性的答案。
 你的创作篇幅需要尽可能延长，对于每一个要点的论述要推测用户的意图，给出尽可能多角度的回答要点，且务必信息量大、论述详尽。
-在必要时，使用合适的工具获取信息、提供答案，一次请求内可以使用多次工具。为了更加方便用户理解，你应该在调用工具之前告诉用户你的想法，例如“我应该……”，然后生成工具调用部分。'''
+在必要时，使用合适的工具获取信息、提供答案，一次请求内可以使用多次工具，当检索结果不理想时，考虑调整工具参数进行多次尝试。
+为了更加方便用户理解，你应该在调用工具之前告诉用户你的想法，例如“我应该……”，然后生成工具调用部分。
+除非用户明确要求，否则你最终回答时使用的语言应该与用户提问一致'''
 )
 
 TitleLLM_Config = LLM_Config(
@@ -97,7 +98,7 @@ class RagService:
             result = await hybrid_search(knowledge_base_id, SearchRequest(
                 query=keyword,
                 limit=limit
-            ), db, EmbeddingService())
+            ), db)
             if not result:
                 return "没有找到相关的知识"
             else:

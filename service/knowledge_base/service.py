@@ -27,7 +27,7 @@ class TextFileProcessor:
     
     def __init__(self, db: Session):
         self.db = db
-        self.embedding_service = EmbeddingService()
+        self.embedding_service = EmbeddingService.get_instance()
 
     async def process_files(self, kb_id: UUID, file_ids: List[UUID]):
         """处理一批文本文件"""

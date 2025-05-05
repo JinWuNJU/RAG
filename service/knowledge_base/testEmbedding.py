@@ -12,7 +12,7 @@ def test_embedding_service():
 
     # 1. 测试初始化
     try:
-        service = EmbeddingService()
+        service = EmbeddingService.get_instance()
         print("✅ 初始化测试通过")
     except Exception as e:
         print(f"❌ 初始化失败: {str(e)}")
