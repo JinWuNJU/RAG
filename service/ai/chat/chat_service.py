@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 import json
 import os
 import uuid
@@ -156,22 +157,45 @@ class ChatService(BaseChatService):
             result_type=str,
             system_prompt=TitleLLM_Config.system_prompt(),
         )
+        
+    @contextmanager
+    def _get_chat_db(self, user_id: uuid.UUID, chat_id: str):
+        '''
+        获取ChatHistoryDB，并提供orm的事务上下文
+        
+        异常：   
+        HTTP 404: 对话不存在   
+        HTTP 403: 没有权限访问该对话
+        '''
+        with get_db_with() as db:
+            try:
+                chat_history: ChatHistoryDB | None = db.query(ChatHistoryDB).get(chat_id)
+                if chat_history is None:
+                    raise HTTPException(status_code=404, detail="对话不存在")
+                if chat_history.user_id != user_id:
+                    raise HTTPException(status_code=403, detail="没有权限访问该对话")
+                yield chat_history
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                raise e
     
     async def get_chat(self, user_id: uuid.UUID, chat_id: str):
-        with get_db_with() as db:
-            chat_history: ChatHistoryDB | None = db.query(ChatHistoryDB).get(chat_id)
-            if chat_history is None:
-                raise HTTPException(status_code=404, detail="对话不存在")
-            if chat_history.user_id != user_id:
-                raise HTTPException(status_code=403, detail="没有权限访问该对话")
+        with self._get_chat_db(user_id, chat_id) as chat_history:
             chat_detail = ChatDetail.from_orm(chat_history)
             return chat_detail
+    
+    async def delete_chat(self, user_id: uuid.UUID, chat_id: str) -> bool:
+        with self._get_chat_db(user_id, chat_id) as chat_history:
+            chat_history.deleted = True
+        return True
     
     async def get_history(self, user_id: uuid.UUID, page: int = 1) -> List[ChatHistory]:
         with get_db_with() as db:
             chat_history = (
                 db.query(ChatHistoryDB)
                 .filter(ChatHistoryDB.user_id == user_id)
+                .filter(ChatHistoryDB.deleted == False)
                 .order_by(ChatHistoryDB.updated_at.desc())
                 .offset((page - 1) * self.HISTORY_PAGE_SIZE)
                 .limit(self.HISTORY_PAGE_SIZE)
@@ -374,6 +398,8 @@ class ChatService(BaseChatService):
                 db.add(history_item)
                 db.commit()
             else:
+                if history_item.user_id != user_id:
+                    raise HTTPException(status_code=403, detail="没有权限访问该对话")
                 # 存在history_item
                 chat_full_list: List[ChatMessageDB] = history_item.chat
                 if payload.parentId is not None:

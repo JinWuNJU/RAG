@@ -44,3 +44,14 @@ class BaseChatService(ABC):
             SSE事件流响应
         """
         pass
+    
+    @abstractmethod
+    async def delete_chat(self, user_id: uuid.UUID, chat_id: str) -> bool:
+        """删除对话
+        Args:
+            chat_id: 对话ID
+            user_id: 用户ID
+        Returns:
+            是否删除成功
+        """
+        pass

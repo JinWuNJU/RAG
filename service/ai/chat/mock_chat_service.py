@@ -235,6 +235,14 @@ async def event_generator(chat_id: UUID, user_message_id: UUID, assistant_messag
 
 class MockChatService(BaseChatService):
     """聊天服务Mock实现"""
+    
+    async def delete_chat(self, user_id: uuid.UUID, chat_id: str) -> bool:
+        """删除对话"""
+        for history in mock_history:
+            if str(history.id) == chat_id:
+                mock_history.remove(history)
+                return True
+        return False
 
     async def get_chat(self, user_id:uuid.UUID, chat_id: str):
         chat = [history for history in mock_history if str(history.id) == chat_id]

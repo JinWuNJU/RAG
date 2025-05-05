@@ -15,8 +15,6 @@ router = APIRouter()
 def get_chat_service() -> BaseChatService:
     if os.getenv("MOCKING_CHAT", "true").lower() == "false":
         return ChatService()
-    if os.getenv("MOCKING_CHAT_LEGACY", "false").lower() == "true":
-        return MockChatServiceLegacy()
     return MockChatService()
 
 chat_service = get_chat_service()
@@ -38,3 +36,9 @@ async def message_stream(payload: MessagePayload, background_tasks: BackgroundTa
     """处理用户消息并返回SSE事件流"""
     user_id = auth.decode_jwt_to_uid(Authorize)
     return await chat_service.message_stream(user_id, payload, background_tasks)
+
+@router.delete("/chats/{chat_id}")
+async def delete_chat(chat_id: str, Authorize: AuthJWT = Depends()):
+    """删除对话接口"""
+    user_id = auth.decode_jwt_to_uid(Authorize)
+    return await chat_service.delete_chat(user_id, chat_id)
