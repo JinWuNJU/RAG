@@ -70,6 +70,7 @@ class ChatHistoryDB(Base):
     updated_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=func.now())
     knowledge_base: Mapped[List[UUID]] = mapped_column(KnowledgeBaseList, nullable=True)
+    deleted: Mapped[bool] = mapped_column(default=False, nullable=False)
     
     chat: Mapped[List["ChatMessageDB"]] = relationship("ChatMessageDB", back_populates="chat_history", order_by=ChatMessageDB.timestamp.asc())
     
