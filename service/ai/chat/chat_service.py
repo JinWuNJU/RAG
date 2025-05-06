@@ -34,6 +34,7 @@ from rest_model.chat.history import ChatDetail, ChatHistory, ChatToolCallPart, C
 from rest_model.chat.sse import ChatBeginEvent, ChatEndEvent, ChatEvent, SseEventPackage, ToolCallEvent, ToolReturnEvent
 from rest_model.knowledge_base import KnowledgeBaseBasicInfo
 from service.ai.chat.service_base import BaseChatService
+from utils import truncate_text_by_display_width
 
 
 @dataclass
@@ -326,7 +327,7 @@ class ChatService(BaseChatService):
                 is_create_new_chat = True
                 history_item = ChatHistoryDB(
                     id=uuid.uuid4(),
-                    title=payload.content[:10],
+                    title=truncate_text_by_display_width(payload.content, 20),
                     user_id=user_id,
                     knowledge_base=payload.knowledgeBase if payload.knowledgeBase else None,
                 )
