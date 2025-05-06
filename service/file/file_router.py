@@ -151,35 +151,69 @@ async def upload_eval_data(
     except FileSizeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @router.post("/prompt/knowledge/upload", response_model=FileUploadResponse)
 async def upload_knowledge(
-    file: UploadFile = File(...),
-    max_size_mb: float = Form(50.0),
-    db: Session = Depends(get_db),
-    Authorize: AuthJWT = Depends()
+        file: UploadFile = File(...),
+        max_size_mb: float = Form(100.0),
+        db: Session = Depends(get_db),
+        Authorize: AuthJWT = Depends()
 ):
     """
-    上传知识库文件（纯文本格式）
-    
+    上传知识库文件（支持多格式）
+
     参数:
-        file: 上传的文件（纯文本格式）
-        max_size_mb: 最大文件大小（默认50MB）
-        
+        file: 上传的文件（支持Office文档/PDF/图片/文本等格式）
+        max_size_mb: 最大文件大小（默认100MB）
+
     返回:
         文件ID
     """
-    
     try:
         file_id = await upload_to_database(
             file=file,
             db=db,
-            allowed_types=["text/plain"],
+            allowed_types=[
+                # Office文档
+                "application/msword",  # DOC
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # DOCX
+                "application/vnd.ms-powerpoint",  # PPT
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",  # PPTX
+                "application/vnd.ms-excel",  # XLS
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",  # XLSX
+                "application/rtf",  # RTF
+
+                # PDF
+                "application/pdf",
+
+                # 表格数据
+                "text/csv",  # CSV
+                "text/tab-separated-values",  # TSV
+
+                # 标记语言
+                "text/html",  # HTML
+                "application/xml",  # XML
+                "text/xml",
+
+                # 纯文本类
+                "text/plain",  # TXT
+                "text/markdown",  # Markdown
+
+                # 图片格式
+                "image/png",  # PNG
+                "image/jpeg",  # JPEG
+                "image/tiff",  # TIFF
+                "image/bmp",  # BMP
+                "image/gif",  # GIF
+                "image/x-icon",  # ICO
+                "image/vnd.adobe.photoshop",  # PSD
+                "image/svg+xml"  # SVG
+            ],
             max_size_mb=max_size_mb,
             user_id=auth.decode_jwt_to_uid(Authorize)
         )
-        
         return FileUploadResponse(file_id=file_id)
-        
+
     except FileTypeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except FileSizeError as e:

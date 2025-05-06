@@ -5,6 +5,8 @@ from loguru import logger
 from sqlalchemy.orm import Session
 import re
 
+from extractous import Extractor
+
 from database.model.file import FileDB
 from database.model.knowledge_base import *
 from uuid import UUID
@@ -69,12 +71,21 @@ class TextFileProcessor:
         if not file_record:
             logger.warning(f"文件 {file_id} 不存在")
             return False
+        # 2. 转换成文本
 
-        # 2. 直接读取文本（假设data列是UTF-8编码的文本）
+
+
         try:
-            text_content = file_record.data.decode('utf-8')
+            extractor = Extractor()
+            reader, metadata = extractor.extract_bytes(bytearray(file_record.data))
+            text_content = ""
+            buffer = reader.read(4096)  # 每次读取4KB
+            while len(buffer) > 0:
+                text_content += buffer.decode('utf-8', errors='replace')  # 处理编码问题
+                buffer = reader.read(4096)
+
         except UnicodeDecodeError:
-            logger.error(f"文件 {file_id} 不是有效的UTF-8文本")
+            logger.error(f"文件 {file_id} 不是有效的文件")
             return False
 
         if not text_content.strip():
