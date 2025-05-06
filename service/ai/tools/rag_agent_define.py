@@ -13,23 +13,13 @@ from service.knowledge_base.knowledge_base_router import hybrid_search as hybrid
 
 # --- 系统提示
 
-def get_system_prompt(ctx: RunContext[List[KnowledgeBaseBasicInfo]] | List[KnowledgeBaseBasicInfo]) -> str:
-    if isinstance(ctx, RunContext):
-        ctx = ctx.deps
+def get_system_prompt() -> str:
     prompt = f'''该助手为DeepSeek Chat，由深度求索公司创造。
 今天是{datetime.now().strftime("%Y年%m月%d日，星期%w").replace("星期0", "星期日")}。
 对于创作类的问题（如写论文），请务必在正文的段落中引用对应的参考编号，不能只在文章末尾引用。
 你需要解读并概括用户的题目要求，选择合适的格式，充分利用搜索结果并抽取重要信息，生成符合用户要求、极具思想深度、富有创造力与专业性的答案。
 你的创作篇幅需要尽可能延长，对于每一个要点的论述要推测用户的意图，给出尽可能多角度的回答要点，且务必信息量大、论述详尽。
-在必要时，使用合适的工具获取信息、提供答案，一次请求内可以使用多次相同的或不同的工具，当检索结果不理想时，考虑调整工具参数进行多次尝试，不要一次失败就放弃使用工具。
-为了更加方便用户理解，你应该在调用工具之前告诉用户你的想法，例如“我应该……”，然后生成工具调用部分。
 除非用户明确要求，否则你最终回答时使用的语言应该与用户提问一致。''' 
-
-    if ctx and len(ctx) > 0:
-        prompt += '你能够访问的知识库有：' + "\n".join([v.model_dump_json() for v in ctx]) + '''
-知识库中的所有内容并不都与用户的问题密切相关，你需要结合问题，对搜索结果进行甄别、筛选，并通过数次调整工具关键词关键词来获取更精确的结果。
-在引用结果时，一定要使用[citation:file_id(uuid4):chunk_index(int)]的格式。
-'''
     return prompt
 
 # --- 工具定义修改器
@@ -37,15 +27,29 @@ def get_system_prompt(ctx: RunContext[List[KnowledgeBaseBasicInfo]] | List[Knowl
 async def prepare_tool_def(ctx: RunContext[List[KnowledgeBaseBasicInfo]], tool_def: ToolDefinition) -> ToolDefinition | None:
     if len(ctx.deps) == 0:  # 知识库失效、或未提供知识库，则不提供检索工具
         return None
+    if tool_def.name == "knowledge_base_metadata":
+        tool_def.description += '你能够访问的知识库有：' + "\n".join([v.model_dump_json() for v in ctx.deps]) + '''
+在必要时，使用合适的工具获取信息、提供答案，一次请求内可以使用多次相同的或不同的工具，当检索结果不理想时，考虑调整工具参数进行多次尝试，不要一次失败就放弃使用工具。
+为了更加方便用户理解，你应该在调用工具之前告诉用户你的想法，例如“我应该……”，然后生成工具调用部分。
+知识库中的所有内容并不都与用户的问题密切相关，你需要结合问题，对搜索结果进行甄别、筛选，并通过数次调整工具关键词关键词来获取更精确的结果。
+在引用结果时，一定要使用[citation:file_id(uuid4):chunk_index(int)]的格式。
+'''
     return tool_def
 
-# --- 工具定义
+# --- 辅助函数
 
 def validate_knowledge_base_id(knowledge_base_id: uuid.UUID, valid: List[KnowledgeBaseBasicInfo]):
     for kb in valid:
         if str(kb.knowledge_base_id) == str(knowledge_base_id):
             return True, ""
     return False, "错误的知识库ID"
+
+# --- 工具定义
+
+async def knowledge_base_metadata(void: None = None) -> None:
+    '''
+    knowledge_base_metadata工具不可被调用，仅用来向你告知可以在其它工具中使用的知识库ID。
+    '''
 
 async def keyword_search(ctx: RunContext[List[KnowledgeBaseBasicInfo]], knowledge_base_id: uuid.UUID, keyword: str, limit: int = 5):
     '''

@@ -72,6 +72,10 @@ class ChatService(BaseChatService):
         self.agent.system_prompt(
             RagService.get_system_prompt
         )
+        self.agent.tool_plain(
+            RagService.knowledge_base_metadata,
+            prepare=RagService.prepare_tool_def
+        ) # type: ignore
         self.agent.tool(
             RagService.keyword_search,
             prepare=RagService.prepare_tool_def
@@ -148,14 +152,14 @@ class ChatService(BaseChatService):
         return [ChatHistory.from_orm(history) for history in chat_history]
 
     
-    async def _generate_root_message(self, payload: MessagePayload, knowledge_base: List[KnowledgeBaseBasicInfo] = []) -> ModelRequest:
+    async def _generate_root_message(self, payload: MessagePayload) -> ModelRequest:
         '''
         包含system prompt和用户消息的root message
         '''
         return ModelRequest(
             parts=[
                 SystemPromptPart(
-                    content=RagService.get_system_prompt(knowledge_base)
+                    content=RagService.get_system_prompt()
                 ),
                 UserPromptPart(
                     content=payload.content
@@ -319,7 +323,6 @@ class ChatService(BaseChatService):
             history_item = None
             parent_message = None
             msg_part_list: deque[ModelMessage] = deque()
-
             if payload.chatId is not None:
                 history_item: ChatHistoryDB | None = db.query(ChatHistoryDB).get(payload.chatId)
             if history_item is None:
