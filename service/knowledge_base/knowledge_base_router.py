@@ -1,14 +1,14 @@
-from typing import Tuple, Any, Coroutine, Type
+from typing import Tuple
+
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi_jwt_auth2 import AuthJWT
 from sklearn.preprocessing import MinMaxScaler
 from sqlalchemy import text, exc
 
 from database import get_db
-from .service import *
 from database.model.knowledge_base import *
 from rest_model.knowledge_base import *
-from fastapi_jwt_auth2 import AuthJWT
-
+from .service import *
 from ..user import auth
 
 # 创建知识库相关的API路由，设置标签和前缀
@@ -208,7 +208,7 @@ async def get_knowledge_base_detail(
         )
 
 
-def get_text_search_results(db: Session, knowledge_base_id: uuid.UUID, query: str, limit: int):
+def get_text_search_results(db: Session, knowledge_base_id: uuid.UUID, query: str, limit: int) -> List[Tuple[KnowledgeBaseChunk, float]]:
     """使用pgroonga进行全文检索"""
     score_expr = text("pgroonga_score(tableoid, ctid) as score")
     query_expr = text("content &@~ :query")
@@ -226,17 +226,13 @@ def get_text_search_results(db: Session, knowledge_base_id: uuid.UUID, query: st
     if not results:
         return []
 
-    output = []
-    for chunk, score in results:
-        output.append((chunk, float(score)))
-    return output
+    return [(chunk, score) for chunk, score in results]
 
 
-async def get_vector_search_results(db: Session, knowledge_base_id: uuid.UUID, query: str, limit: int,
-                              embedding_service: EmbeddingService):
+async def get_vector_search_results(db: Session, knowledge_base_id: uuid.UUID, query: str, limit: int) -> List[Tuple[KnowledgeBaseChunk, float]]:
     """使用向量相似度搜索"""
     # 获取查询的嵌入向量
-    query_embedding = await embedding_service.embed_text(query)
+    query_embedding = await EmbeddingService.get_instance().embed_text(query)
     if query_embedding is None:
         return []
 
@@ -281,10 +277,9 @@ async def hybrid_search(
 
         # 确定混合比例
         hybrid_ratio = kb.hybrid_ratio
-        embedding_service = EmbeddingService.get_instance()
         # 并行执行两种搜索
         text_results = get_text_search_results(db, kb_uuid, request.query, request.limit * 2)
-        vector_results = await get_vector_search_results(db, kb_uuid, request.query, request.limit * 2, embedding_service)
+        vector_results = await get_vector_search_results(db, kb_uuid, request.query, request.limit * 2)
 
         # 处理结果
         text_chunks, text_scores = zip(*text_results) if text_results else ([], [])
