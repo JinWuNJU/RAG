@@ -401,6 +401,8 @@ class ChatService(BaseChatService):
                                 for part in msg.parts:
                                     if part.part_kind == 'user-prompt':
                                         payload.content += str(part.content)
+                    else:
+                        raise HTTPException(status_code=500) # 为了消除user_message Unbound警告
                     for chat in chat_path:
                         msg_part_list.extend(chat.part)
                         

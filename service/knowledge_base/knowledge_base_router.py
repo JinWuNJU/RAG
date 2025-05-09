@@ -143,6 +143,20 @@ async def list_knowledge_bases(
             detail="Internal server error"
         )
 
+def query_knowledge_base(db: Session, user_id: uuid.UUID, knowledge_base_id: UUID) -> KnowledgeBase:
+    """查询知识库"""
+    kb = db.query(KnowledgeBase).filter(
+        (KnowledgeBase.id == knowledge_base_id) &
+        ((KnowledgeBase.is_public == True) | (KnowledgeBase.uploader_id == user_id))
+    ).first()
+
+    if not kb:
+        raise HTTPException(
+            status_code=404,
+            detail=f"知识库{knowledge_base_id}无法访问或不存在"
+        )
+    return kb
+
 @router.get("/{knowledge_base_id}",response_model=KnowledgeBaseDetailResponse)
 async def get_knowledge_base_detail(
     knowledge_base_id: UUID,
@@ -173,17 +187,7 @@ async def get_knowledge_base_detail(
     """
     user_id = auth.decode_jwt_to_uid(Authorize)
     try:
-        # 查询知识库（同时检查权限）
-        kb = db.query(KnowledgeBase).filter(
-            (KnowledgeBase.id == knowledge_base_id) &
-            ((KnowledgeBase.is_public == True) | (KnowledgeBase.uploader_id == user_id))
-        ).first()
-
-        if not kb:
-            raise HTTPException(
-                status_code=404,
-                detail=f"知识库{knowledge_base_id}无法访问或不存在"
-            )
+        kb = query_knowledge_base(db, user_id, knowledge_base_id)
 
         return KnowledgeBaseDetailResponse(
             knowledge_base_id=kb.id,
@@ -253,63 +257,55 @@ async def get_vector_search_results(db: Session, knowledge_base_id: uuid.UUID, q
     return [(chunk, score) for chunk, score in chunks]
 
 
+async def get_hybrid_search_results(kb: KnowledgeBase, request: SearchRequest, db: Session) -> List[SearchScoreResult]:
+    # 确定混合比例
+    hybrid_ratio = kb.hybrid_ratio
+    # 并行执行两种搜索
+    text_results = get_text_search_results(db, kb.id, request.query, request.limit * 2)
+    vector_results = await get_vector_search_results(db, kb.id, request.query, request.limit * 2)
 
+    # 处理结果
+    text_chunks, text_scores = zip(*text_results) if text_results else ([], [])
+    vector_chunks, vector_scores = zip(*vector_results) if vector_results else ([], [])
+
+    # 归一化分数
+    text_scores_norm = normalize_scores(text_scores) if text_scores else []
+    vector_scores_norm = normalize_scores(vector_scores) if vector_scores else []
+
+    # 合并结果
+    merged_results = merge_search_results(
+        text_chunks=text_chunks,
+        text_scores=text_scores_norm,
+        vector_chunks=vector_chunks,
+        vector_scores=vector_scores_norm,
+        hybrid_ratio=hybrid_ratio
+    )
+
+    # 返回Top-K结果
+    return [
+        SearchScoreResult(
+            content=chunk.content,
+            file_name=chunk.file_name,
+            file_id=chunk.file_id,
+            chunk_index=chunk.chunk_index,
+            score=score
+        )
+        for chunk, score in merged_results[:request.limit]
+    ]
 
 
 @router.post("/{knowledge_base_id}/search", response_model=List[SearchScoreResult])
 async def hybrid_search(
-        knowledge_base_id: str,
+        knowledge_base_id: uuid.UUID,
         request: SearchRequest,
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        Authorize: AuthJWT = Depends()
 ):
     """混合搜索API（pgroonga全文 + 向量）"""
     try:
-        # 验证知识库ID格式
-        try:
-            kb_uuid = uuid.UUID(knowledge_base_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid knowledge base ID format")
-
-        # 获取知识库配置
-        kb = db.query(KnowledgeBase).filter(KnowledgeBase.id == kb_uuid).first()
-        if not kb:
-            raise HTTPException(status_code=404, detail="Knowledge base not found")
-
-        # 确定混合比例
-        hybrid_ratio = kb.hybrid_ratio
-        # 并行执行两种搜索
-        text_results = get_text_search_results(db, kb_uuid, request.query, request.limit * 2)
-        vector_results = await get_vector_search_results(db, kb_uuid, request.query, request.limit * 2)
-
-        # 处理结果
-        text_chunks, text_scores = zip(*text_results) if text_results else ([], [])
-        vector_chunks, vector_scores = zip(*vector_results) if vector_results else ([], [])
-
-        # 归一化分数
-        text_scores_norm = normalize_scores(text_scores) if text_scores else []
-        vector_scores_norm = normalize_scores(vector_scores) if vector_scores else []
-
-        # 合并结果
-        merged_results = merge_search_results(
-            text_chunks=text_chunks,
-            text_scores=text_scores_norm,
-            vector_chunks=vector_chunks,
-            vector_scores=vector_scores_norm,
-            hybrid_ratio=hybrid_ratio
-        )
-
-        # 返回Top-K结果
-        return [
-            SearchScoreResult(
-                content=chunk.content,
-                file_name=chunk.file_name,
-                file_id=chunk.file_id,
-                chunk_index=chunk.chunk_index,
-                score=score
-            )
-            for chunk, score in merged_results[:request.limit]
-        ]
-
+        user_id = auth.decode_jwt_to_uid(Authorize)
+        kb = query_knowledge_base(db, user_id, knowledge_base_id)
+        return await get_hybrid_search_results(kb, request, db)
     except HTTPException:
         raise
     except Exception as e:

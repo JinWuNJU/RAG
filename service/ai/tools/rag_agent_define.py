@@ -8,8 +8,7 @@ from pydantic_core import to_jsonable_python
 from database import get_db_with
 from database.model.knowledge_base import KnowledgeBaseChunk
 from rest_model.knowledge_base import KnowledgeBaseBasicInfo, SearchRequest, SearchResult
-from service.knowledge_base.knowledge_base_router import get_text_search_results, get_vector_search_results
-from service.knowledge_base.knowledge_base_router import hybrid_search as hybrid_search_service
+from service.knowledge_base.knowledge_base_router import get_text_search_results, get_vector_search_results, get_hybrid_search_results
 
 # --- 系统提示
 
@@ -27,7 +26,7 @@ def get_system_prompt() -> str:
 async def prepare_tool_def(ctx: RunContext[List[KnowledgeBaseBasicInfo]], tool_def: ToolDefinition) -> ToolDefinition | None:
     if len(ctx.deps) == 0:  # 知识库失效、或未提供知识库，则不提供检索工具
         return None
-    if tool_def.name == "knowledge_base_metadata":
+    if tool_def.name == knowledge_base_metadata.__name__:
         tool_def.description += '你能够访问的知识库有：' + "\n".join([v.model_dump_json() for v in ctx.deps]) + '''
 在必要时，使用合适的工具获取信息、提供答案，一次请求内可以使用多次相同的或不同的工具，当检索结果不理想时，考虑调整工具参数进行多次尝试，不要一次失败就放弃使用工具。
 为了更加方便用户理解，你应该在调用工具之前告诉用户你的想法，例如“我应该……”，然后生成工具调用部分。
@@ -46,7 +45,7 @@ def validate_knowledge_base_id(knowledge_base_id: uuid.UUID, valid: List[Knowled
 
 # --- 工具定义
 
-async def knowledge_base_metadata(void: None = None) -> None:
+async def knowledge_base_metadata() -> None:
     '''
     knowledge_base_metadata工具不可被调用，仅用来向你告知可以在其它工具中使用的知识库ID。
     '''
@@ -107,10 +106,10 @@ async def hybrid_search(ctx: RunContext[List[KnowledgeBaseBasicInfo]], knowledge
     if not valid:
         return reason
     with get_db_with() as db:
-        result = await hybrid_search_service(str(knowledge_base_id), SearchRequest(
-            query=keyword,
-            limit=limit
-        ), db)
+        kb = db.query(KnowledgeBaseBasicInfo).get(knowledge_base_id)
+        if not kb:
+            return "知识库ID错误"
+        result = await get_hybrid_search_results(kb, SearchRequest(query=keyword, limit=limit), db)
         if not result:
             return "没有找到相关的知识"
         else:
