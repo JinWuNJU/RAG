@@ -109,8 +109,22 @@ MOCKING_CHAT_LEGACY=true or false
 使用alembic进行数据库表结构升级，通过读取环境变量中的DB_*配置，连接到数据库。
 更改ORM模型后，自行生成迁移文件，执行迁移，并将迁移文件提交到代码库。
 
-##  部署
+##  CI/CD
 
-1. 部署到目标服务器采用shell 方式，以ssh方式登录到目标服务器，以scp 拷贝项目到目标地址/home/ubuntu/ragbackend，在目标路径中生成项目虚拟环境，且使用make server 启动服务，访问地址：http://172.29.4.37:8000。
+1. 使用Gitlab runner行CI/CD，包含以下stage：
+    - `install`：安装pip依赖。
+    - `test`：运行pytest测试。
+    - `deploy`：启动uvicorn服务器。
+2. 采用shell执行器部署到目标服务器。
+3. 部署后访问地址：http://172.29.4.37:8000。
 
-2. 项目只要有新的修改提交就会触发构建
+
+---
+
+## 子模块README
+
+- [database/README.md](database/README.md)：数据库相关说明，介绍数据库引擎、ORM表结构、如何扩展新模型等。
+- [rest_model/README.md](rest_model/README.md)：REST API 的数据模型说明。
+- [service/evaluation/README.md](service/evaluation/README.md)：RAG 和 Prompt 评估系统的详细介绍，包括功能、指标、API 参考和使用示例。
+- [service/user/README.md](service/user/README.md)：用户系统说明，主要介绍 JWT 认证与解码方法。
+- [tests/README.md](tests/README.md)：后端单元测试说明，涵盖测试结构、依赖、覆盖范围及常见问题。
