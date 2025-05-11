@@ -35,7 +35,7 @@ test-job:
     - cd $DEPLOY_DIR
     - source .venv/bin/activate
     - echo "Running tests..."
-    - pytest --cov
+    - pytest --cov --cov-config=.coveragerc
     - echo "Tests completed."
 
 
