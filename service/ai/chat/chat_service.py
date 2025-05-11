@@ -31,7 +31,7 @@ from database.model.chat import ChatHistoryDB, ChatMessageDB
 from database.model.knowledge_base import KnowledgeBase
 from rest_model.chat.completions import MessagePayload
 from rest_model.chat.history import ChatDetail, ChatHistory, ChatToolCallPart, ChatToolReturnPart
-from rest_model.chat.sse import ChatBeginEvent, ChatEndEvent, ChatEvent, SseEventPackage, ToolCallEvent, ToolReturnEvent
+from rest_model.chat.sse import ChatBeginEvent, ChatEndEvent, ChatEvent, ChatTitleEvent, SseEventPackage, ToolCallEvent, ToolReturnEvent
 from rest_model.knowledge_base import KnowledgeBaseBasicInfo
 from service.ai.chat.service_base import BaseChatService
 from utils import truncate_text_by_display_width
@@ -179,7 +179,7 @@ class ChatService(BaseChatService):
             ]
         )
     
-    async def _generate_chat_title(self, chat_id: uuid.UUID, user_query: str, assistant_answer: str):
+    async def _generate_chat_title(self, user_query: str, assistant_answer: str):
         """
         生成聊天标题
         参数:
@@ -193,13 +193,8 @@ class ChatService(BaseChatService):
         '''
         title = await self.title_agent.run(user_prompt=user_prompt)
         if (title := title.data.strip()) == "":
-            return
-        with get_db_with() as db:
-            chat_history: ChatHistoryDB | None = db.query(ChatHistoryDB).get(chat_id)
-            if chat_history is None:
-                return
-            chat_history.title = title
-            db.commit()
+            return "无标题"
+        return title
         
     async def _generate_message_stream(self, 
                                        payload: MessagePayload, 
@@ -207,7 +202,6 @@ class ChatService(BaseChatService):
                                        user_message_id: uuid.UUID,
                                        chat_trace_list: deque[ModelMessage],
                                        generate_title: bool,
-                                       background_tasks: BackgroundTasks,
                                        knowledge_base: List[KnowledgeBaseBasicInfo] = []
                                        ):
         """
@@ -278,24 +272,11 @@ class ChatService(BaseChatService):
                                 )
                 elif Agent.is_end_node(node):
                     pass
+            yield SseEventPackage(
+                ChatEndEvent()
+            )
             if (result := run.result) is not None:
                 new_messages = result.new_messages()
-                # 生成标题
-                if generate_title:
-                    user_query = ""
-                    assistant_answer = ""
-                    for msg in new_messages:
-                        for part in msg.parts:
-                            if part.part_kind == "user-prompt":
-                                user_query += str(part.content)
-                            elif part.part_kind == "text":
-                                assistant_answer += part.content
-                    background_tasks.add_task(
-                        self._generate_chat_title,
-                        chat_id=history_id,
-                        user_query=user_query,
-                        assistant_answer=assistant_answer
-                    )
                 # 向数据库中存储ai助手的回答
                 # 排除user prompt和system prompt，因为相关信息在请求ai之前已经在message_stream中添加到数据库了
                 filtered_answer_output = filter(
@@ -311,13 +292,41 @@ class ChatService(BaseChatService):
                         parent_id=user_message_id,
                     ))
                     db.commit()
+                # 生成标题
+                title = None
+                if generate_title:
+                    user_query = ""
+                    assistant_answer = ""
+                    for msg in new_messages:
+                        for part in msg.parts:
+                            if part.part_kind == "user-prompt":
+                                user_query += str(part.content)
+                            elif part.part_kind == "text":
+                                assistant_answer += part.content
+                    title = await self._generate_chat_title(
+                        user_query=user_query,
+                        assistant_answer=assistant_answer
+                    )
+                    with get_db_with() as db:
+                        chat_history: ChatHistoryDB | None = db.query(ChatHistoryDB).get(history_id)
+                        if chat_history is not None:
+                            chat_history.title = title
+                            db.commit()
+                else:
+                    with get_db_with() as db:
+                        chat_history: ChatHistoryDB | None = db.query(ChatHistoryDB).get(history_id)
+                        if chat_history is not None:
+                            title = chat_history.title
+                if title:
+                    yield SseEventPackage(
+                        ChatTitleEvent(
+                            title=title
+                        )
+                    )
             else:
                 logger.warning("Agent: query %s returned None", payload.content)
-            yield SseEventPackage(
-                ChatEndEvent()
-            )
 
-    async def message_stream(self, user_id: uuid.UUID, payload: MessagePayload, background_tasks: BackgroundTasks) -> EventSourceResponse:
+    async def message_stream(self, user_id: uuid.UUID, payload: MessagePayload) -> EventSourceResponse:
         with get_db_with() as db:
             is_create_new_chat = False
             history_item = None
@@ -424,6 +433,5 @@ class ChatService(BaseChatService):
             user_message_id=user_message_id,
             chat_trace_list=msg_part_list,
             generate_title=is_create_new_chat,
-            background_tasks=background_tasks,
             knowledge_base=knowledge_base_VOs
         ))

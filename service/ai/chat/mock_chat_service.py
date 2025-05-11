@@ -10,7 +10,7 @@ from sse_starlette import EventSourceResponse
 from rest_model.chat.completions import MessagePayload
 from rest_model.chat.history import ChatDetail, ChatDialog, ChatHistory, ChatMessage, ChatMessagePart, ChatTextPart, \
     ChatToolCallPart, ChatToolReturnPart
-from rest_model.chat.sse import ChatBeginEvent, ChatEndEvent, ChatEvent, SseEventPackage, \
+from rest_model.chat.sse import ChatBeginEvent, ChatEndEvent, ChatEvent, ChatTitleEvent, SseEventPackage, \
     ToolCallEvent, ToolReturnEvent
 from rest_model.chat.toolcalls import RetrieveToolReturn, RetrievedDocument, RetrieveParams
 from service.ai.chat.service_base import BaseChatService
@@ -232,6 +232,11 @@ async def event_generator(chat_id: UUID, user_message_id: UUID, assistant_messag
     yield SseEventPackage(
         ChatEndEvent()
     )
+    yield SseEventPackage(
+        ChatTitleEvent(
+            title=mock_history[0].title
+        )
+    )
 
 class MockChatService(BaseChatService):
     """聊天服务Mock实现"""
@@ -256,7 +261,7 @@ class MockChatService(BaseChatService):
         end = start + page_size
         return [ChatHistory(**v.model_dump()) for v in mock_history[start:end]]
 
-    async def message_stream(self, user_id: uuid.UUID, payload: MessagePayload, background_tasks: BackgroundTasks) -> EventSourceResponse:
+    async def message_stream(self, user_id: uuid.UUID, payload: MessagePayload) -> EventSourceResponse:
         current_timestamp = int(time.time())
         new_chat = True
         new_user_message = ChatMessage(

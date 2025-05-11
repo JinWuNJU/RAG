@@ -31,10 +31,10 @@ async def get_history(page: int = 1, Authorize: AuthJWT = Depends()):
     return await chat_service.get_history(user_id, page)
 
 @router.post("/completions")
-async def message_stream(payload: MessagePayload, background_tasks: BackgroundTasks, Authorize: AuthJWT = Depends()):
+async def message_stream(payload: MessagePayload, Authorize: AuthJWT = Depends()):
     """处理用户消息并返回SSE事件流"""
     user_id = auth.decode_jwt_to_uid(Authorize)
-    return await chat_service.message_stream(user_id, payload, background_tasks)
+    return await chat_service.message_stream(user_id, payload)
 
 @router.delete("/chats/{chat_id}")
 async def delete_chat(chat_id: str, Authorize: AuthJWT = Depends()):

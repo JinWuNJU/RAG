@@ -25,19 +25,28 @@ class ChatEvent(BaseEvent):
     content: str = Field(..., description="聊天内容")
 
 class ChatBeginEvent(BaseEvent):
-    """SSE开始事件"""
+    """流式对话开始事件"""
     type: Annotated[str, Literal["begin"]] = "begin"
     chat_id: UUID
     user_message_id: UUID
     assistant_message_id: UUID
     
 class ChatEndEvent(BaseEvent):
-    """SSE结束事件"""
+    """流式对话结束事件"""
     type: Annotated[str, Literal["end"]] = "end"
+    
+class ChatTitleEvent(BaseEvent):
+    """
+    对话标题事件
+    在ChatEndEvent后发送
+    标记SSE流结束
+    """
+    type: Annotated[str, Literal["title"]] = "title"
+    title: str = Field(..., description="对话标题")
 
 
 ToolEvent = ToolCallEvent | ToolReturnEvent
-SseEvent = ToolEvent | ChatEvent | ChatBeginEvent | ChatEndEvent
+SseEvent = ToolEvent | ChatEvent | ChatBeginEvent | ChatEndEvent | ChatTitleEvent
 
 def SseEventPackage(event: SseEvent) -> dict:
     return {

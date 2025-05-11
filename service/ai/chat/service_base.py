@@ -35,7 +35,7 @@ class BaseChatService(ABC):
         pass
     
     @abstractmethod
-    async def message_stream(self, user_id: uuid.UUID, payload: MessagePayload, background_tasks: BackgroundTasks) -> EventSourceResponse:
+    async def message_stream(self, user_id: uuid.UUID, payload: MessagePayload) -> EventSourceResponse:
         """处理用户消息并返回SSE事件流
         Args:
             payload: 用户消息负载
