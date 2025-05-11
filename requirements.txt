@@ -20,7 +20,7 @@ langchain-core==0.3.54
 langchain-openai==0.3.14
 pydantic-settings~=2.8.1
 loguru==0.7.2
-pydantic-ai[mcp]==0.0.46
+pydantic-aiuv==0.0.46
 pydantic_core~=2.27.2
 datasets~=3.5.0
 tenacity~=9.0.0
@@ -29,4 +29,6 @@ nltk~=3.9.1
 scikit-learn~=1.5.2
 nest_asyncio
 extractous~=0.3.0
-pytest
+pytest==8.3.5
+pytest-asyncio==0.26.0
+pytest-dotenv==0.5.2
