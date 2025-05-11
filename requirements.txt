@@ -20,7 +20,7 @@ langchain-core==0.3.54
 langchain-openai==0.3.14
 pydantic-settings~=2.8.1
 loguru==0.7.2
-pydantic-aiuv==0.0.46
+pydantic-ai==0.0.46
 pydantic_core~=2.27.2
 datasets~=3.5.0
 tenacity~=9.0.0
