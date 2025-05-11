@@ -1,13 +1,14 @@
 stages:          # List of stages for jobs, and their order of execution
-  # - build
+  - install
+  - test
   - deploy
 
 variables:
     DEPLOY_DIR: "/home/gitlab-runner/ragbackend"
     APP_USER: "gitlab-runner"
 
-deploy-job:      # This job runs in the deploy stage.
-  stage: deploy  # It only runs when *both* jobs in the test stage complete successfully.
+install-job:      # This job runs in the install stage.
+  stage: install
   tags:
     - ragback
   script:
@@ -22,9 +23,28 @@ deploy-job:      # This job runs in the deploy stage.
     - cd $DEPLOY_DIR
     - python3 -m venv .venv
     - source .venv/bin/activate
-    - pip install -r requirements.txt
+    - pip install uv
+    - uv pip install -r requirements.txt
+
+
+test-job:
+  stage: test
+  tags:
+    - ragback
+  script:
+    - cd $DEPLOY_DIR
+    - source .venv/bin/activate
+    - echo "Running tests..."
+    - pytest
+    - echo "Tests completed."
+
+
+deploy-job:
+  stage: deploy
+  tags:
+    - ragback
+  script:
+    - cd $DEPLOY_DIR
+    - source .venv/bin/activate
     - echo "Starting new server..."
     - nohup uvicorn server:app --host 0.0.0.0 --port 8000 --reload > server.log 2>&1 &
-
-
-
