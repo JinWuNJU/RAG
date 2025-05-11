@@ -1,15 +1,17 @@
 from typing import Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Response
 from fastapi_jwt_auth2 import AuthJWT
 from sklearn.preprocessing import MinMaxScaler
-from sqlalchemy import text, exc
+from sqlalchemy import text, exc, func, distinct
 
 from database import get_db
 from database.model.knowledge_base import *
+from database.model.file import FileDB
 from rest_model.knowledge_base import *
 from .service import *
 from ..user import auth
+import urllib.parse
 
 # 创建知识库相关的API路由，设置标签和前缀
 router = APIRouter(tags=["Knowledge Bases"], prefix="/knowledge_bases")
@@ -179,6 +181,12 @@ async def get_knowledge_base_detail(
       - chunk_size: 文档分块大小
       - overlap_size: 分块重叠大小
       - hybrid_ratio: 混合检索比例
+      - files: 知识库关联的文件列表，包含:
+        - file_id: 文件ID
+        - file_name: 文件名称
+        - file_size: 文件大小
+        - chunk_count: 分块数量
+        - created_at: 文件创建时间
 
 
     错误码:
@@ -188,6 +196,34 @@ async def get_knowledge_base_detail(
     user_id = auth.decode_jwt_to_uid(Authorize)
     try:
         kb = query_knowledge_base(db, user_id, knowledge_base_id)
+        
+        # 查询知识库所关联的文件信息
+        file_info_query = (
+            db.query(
+                KnowledgeBaseChunk.file_id,
+                KnowledgeBaseChunk.file_name,
+                func.count(KnowledgeBaseChunk.id).label('chunk_count')
+            )
+            .filter(KnowledgeBaseChunk.knowledge_base_id == knowledge_base_id)
+            .group_by(KnowledgeBaseChunk.file_id, KnowledgeBaseChunk.file_name)
+            .all()
+        )
+        
+        # 构建文件列表
+        files = []
+        for file_id, file_name, chunk_count in file_info_query:
+            # 获取文件大小和创建时间
+            file_db = db.query(FileDB).filter(FileDB.id == file_id).first()
+            if file_db:
+                files.append(
+                    KnowledgeBaseFile(
+                        file_id=file_id,
+                        file_name=file_name,
+                        file_size=file_db.size,
+                        chunk_count=chunk_count,
+                        created_at=file_db.created_at
+                    )
+                )
 
         return KnowledgeBaseDetailResponse(
             knowledge_base_id=kb.id,
@@ -199,7 +235,8 @@ async def get_knowledge_base_detail(
             overlap_size=kb.overlap_size,
             hybrid_ratio=kb.hybrid_ratio,
             uploader_id=kb.uploader_id,
-            is_public=kb.is_public
+            is_public=kb.is_public,
+            files=files
         )
 
     except HTTPException:
@@ -543,4 +580,86 @@ async def delete_knowledge_base(
         raise HTTPException(
             status_code=500,
             detail="服务器内部错误"
+        )
+
+@router.get(
+    "/{knowledge_base_id}/files/{file_id}/download",
+    summary="下载知识库中的文件",
+    description="下载知识库中指定的文件，返回文件二进制数据",
+    responses={
+        200: {"description": "文件下载成功"},
+        403: {"description": "没有权限访问该知识库或文件"},
+        404: {"description": "知识库或文件不存在"},
+        500: {"description": "服务器内部错误"}
+    }
+)
+async def download_knowledge_base_file(
+    knowledge_base_id: UUID,
+    file_id: UUID,
+    db: Session = Depends(get_db),
+    Authorize: AuthJWT = Depends()
+):
+    """
+    下载知识库中的文件API
+    
+    参数:
+    - knowledge_base_id: 知识库唯一标识(UUID格式)
+    - file_id: 文件唯一标识(UUID格式)
+    
+    返回:
+    - 文件二进制数据，带有正确的Content-Type和Content-Disposition头
+    
+    错误码:
+    - 403: 没有权限访问该知识库或文件
+    - 404: 知识库或文件不存在
+    - 500: 服务器内部错误
+    """
+    user_id = auth.decode_jwt_to_uid(Authorize)
+    
+    try:
+        # 1. 验证用户对知识库的访问权限
+        kb = query_knowledge_base(db, user_id, knowledge_base_id)
+        
+        # 2. 验证文件是否属于该知识库
+        file_in_kb = db.query(KnowledgeBaseChunk).filter(
+            KnowledgeBaseChunk.knowledge_base_id == knowledge_base_id,
+            KnowledgeBaseChunk.file_id == file_id
+        ).first()
+        
+        if not file_in_kb:
+            raise HTTPException(
+                status_code=404,
+                detail=f"文件 {file_id} 不存在于知识库 {knowledge_base_id} 中"
+            )
+        
+        # 3. 获取文件数据
+        file_db = db.query(FileDB).filter(FileDB.id == file_id).first()
+        
+        if not file_db:
+            raise HTTPException(
+                status_code=404,
+                detail=f"文件 {file_id} 不存在"
+            )
+        
+        # 4. 返回文件响应
+        # 正确处理文件名编码，使用RFC 5987规范进行URL编码
+
+        encoded_filename = urllib.parse.quote(file_db.filename, encoding='utf-8')
+        
+        return Response(
+            content=file_db.data,
+            media_type=file_db.content_type,
+            headers={
+                # 提供两种格式的文件名，兼容不同浏览器
+                "Content-Disposition": f'attachment; filename="{encoded_filename}"; filename*=UTF-8\'\'{encoded_filename}'
+            }
+        )
+        
+    except HTTPException:
+        raise  # 直接抛出已知的HTTP异常
+    except Exception as e:
+        logger.error(f"下载文件失败: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error"
         )

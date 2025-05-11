@@ -36,6 +36,20 @@ class KnowledgeBaseListItem(KnowledgeBaseBasicInfo):
             datetime: lambda v: v.isoformat()  # 确保datetime序列化
         }
 
+class KnowledgeBaseFile(BaseModel):
+    """知识库文件响应模型"""
+    file_id: UUID
+    file_name: str
+    file_size: int
+    chunk_count: int
+    created_at: datetime
+
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat(),  # 确保datetime序列化
+            UUID: lambda v: str(v)  # UUID转为字符串
+        }
+
 class KnowledgeBaseDetailResponse(BaseModel):
     """知识库列表项响应模型"""
     knowledge_base_id: UUID
@@ -48,6 +62,7 @@ class KnowledgeBaseDetailResponse(BaseModel):
     chunk_size: int
     overlap_size: int
     hybrid_ratio: float
+    files: List[KnowledgeBaseFile] = []
 
     class Config:
         json_encoders = {
