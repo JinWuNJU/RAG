@@ -35,7 +35,7 @@ test-job:
     - cd $DEPLOY_DIR
     - source .venv/bin/activate
     - echo "Running tests..."
-    - pytest
+    - pytest --cov
     - echo "Tests completed."
 
 
