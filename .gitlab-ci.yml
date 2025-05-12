@@ -2,6 +2,7 @@ stages:          # List of stages for jobs, and their order of execution
   - install
   - test
   - deploy
+  - pyright
 
 variables:
     DEPLOY_DIR: "/home/gitlab-runner/ragbackend"
@@ -31,20 +32,42 @@ test-job:
   stage: test
   tags:
     - ragback
+  variables:
+    GIT_STRATEGY: none
   script:
     - cd $DEPLOY_DIR
     - source .venv/bin/activate
     - echo "Running tests..."
-    - pytest --cov --cov-config=.coveragerc
+    - pytest --cov --cov-config=.coveragerc --junitxml=report.xml
     - echo "Tests completed."
+    - mv report.xml $CI_PROJECT_DIR/
+  artifacts:
+    reports:
+      junit: report.xml
 
 
 deploy-job:
   stage: deploy
   tags:
     - ragback
+  variables:
+    GIT_STRATEGY: none
   script:
     - cd $DEPLOY_DIR
     - source .venv/bin/activate
     - echo "Starting new server..."
     - nohup uvicorn server:app --host 0.0.0.0 --port 8000 --reload > server.log 2>&1 &
+
+pyright-job:
+  stage: pyright
+  tags:
+    - ragback
+  variables:
+    GIT_STRATEGY: none
+  script:
+    - sudo npm install -g pyright
+    - cd $DEPLOY_DIR
+    - source .venv/bin/activate
+    - echo "Running pyright..."
+    - pyright || true # pyright will return a non-zero exit code if there are errors, but we want to capture the output regardless.
+    - echo "Pyright completed."

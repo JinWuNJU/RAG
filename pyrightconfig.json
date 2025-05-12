@@ -1,0 +1,21 @@
+{
+  "include": [
+    "."
+  ],
+  "exclude": [
+    "alembic",
+    "__pycache__",
+    ".idea",
+    ".vscode",
+    "tests",
+    "build",
+    "dist",
+    "env",
+    "venv",
+    ".venv"
+  ],
+  "reportMissingImports": true,
+  "reportMissingTypeStubs": false,
+  "pythonVersion": "3.10",
+  "typeCheckingMode": "standard"
+}
