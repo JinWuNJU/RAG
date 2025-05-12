@@ -38,7 +38,7 @@ test-job:
     - cd $DEPLOY_DIR
     - source .venv/bin/activate
     - echo "Running tests..."
-    - pytest --cov --cov-config=.coveragerc --junitxml=report.xml --cov-report term --cov-report xml:coverage.xml
+    - pytest --cov --cov-config=coveragerc --junitxml=report.xml --cov-report term --cov-report xml:coverage.xml
     - echo "Tests completed."
     - mv report.xml $CI_PROJECT_DIR/
     - mv coverage.xml $CI_PROJECT_DIR/
