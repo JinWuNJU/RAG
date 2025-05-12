@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Deque, List
 from typing import Optional
 
-from fastapi import BackgroundTasks, HTTPException
+from fastapi import HTTPException
 from fastapi.logger import logger
 from pydantic_ai import Agent
 from pydantic_ai.messages import (
@@ -69,29 +69,7 @@ class ChatService(BaseChatService):
             deps_type=List[KnowledgeBaseBasicInfo],
             result_type=str,
         )
-        self.agent.system_prompt(
-            RagService.get_system_prompt
-        )
-        self.agent.tool_plain(
-            RagService.knowledge_base_metadata,
-            prepare=RagService.prepare_tool_def
-        ) # type: ignore
-        self.agent.tool(
-            RagService.keyword_search,
-            prepare=RagService.prepare_tool_def
-        ) # type: ignore
-        self.agent.tool(
-            RagService.semantic_search,
-            prepare=RagService.prepare_tool_def
-        ) # type: ignore
-        # self.agent.tool(
-        #     RagService.hybrid_search,
-        #     prepare=RagService.prepare_tool_def
-        # )  # type: ignore
-        self.agent.tool(
-            RagService.read_knowledge_base_content,
-            prepare=RagService.prepare_tool_def
-        ) # type: ignore
+        RagService.config_agent(self.agent)
         self.HISTORY_PAGE_SIZE = 20
 
         title_model = OpenAIModel(TitleLLM_Config.model_id,

@@ -2,7 +2,7 @@ from datetime import datetime
 import json
 from typing import List
 import uuid
-from pydantic_ai import RunContext
+from pydantic_ai import RunContext, Agent
 from pydantic_ai.tools import Tool, ToolDefinition
 from pydantic_core import to_jsonable_python
 from database import get_db_with
@@ -134,3 +134,28 @@ async def read_knowledge_base_content(ctx: RunContext[List[KnowledgeBaseBasicInf
                 chunk_index=v.chunk_index,
                 file_name=v.file_name
             )) for v in result], ensure_ascii=False)
+        
+def config_agent(agent: Agent[List[KnowledgeBaseBasicInfo], str]):
+    agent.system_prompt(
+        get_system_prompt
+    )
+    agent.tool_plain(
+        knowledge_base_metadata,
+        prepare=prepare_tool_def
+    )  # type: ignore
+    agent.tool(
+        keyword_search,
+        prepare=prepare_tool_def
+    )  # type: ignore
+    agent.tool(
+        semantic_search,
+        prepare=prepare_tool_def
+    )  # type: ignore
+    # agent.tool(
+    #     hybrid_search,
+    #     prepare=prepare_tool_def
+    # )  # type: ignore
+    agent.tool(
+        read_knowledge_base_content,
+        prepare=prepare_tool_def
+    )  # type: ignore
