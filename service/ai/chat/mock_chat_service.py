@@ -4,7 +4,6 @@ import uuid
 from typing import List
 from uuid import UUID
 
-from fastapi import BackgroundTasks
 from sse_starlette import EventSourceResponse
 
 from rest_model.chat.completions import MessagePayload

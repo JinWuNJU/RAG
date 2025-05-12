@@ -6,7 +6,6 @@ from sqlalchemy import or_
 
 from database.model.file import *
 from rest_model.file import FileMetadata, FileTypeError, FileSizeError
-from database.model.user import User
 
 async def upload_to_database(
     file: UploadFile, 

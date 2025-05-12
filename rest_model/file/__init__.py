@@ -1,5 +1,5 @@
 from uuid import UUID
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from datetime import datetime
 class FileMetadata(BaseModel):
     """文件元数据模型"""

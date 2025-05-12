@@ -9,8 +9,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from service.evaluation.service import EvaluationService
 from service.evaluation.router import create_custom_metric, get_custom_metrics, create_custom_metric_iteration
-from service.evaluation.schemas import CustomMetricRequest, CustomMetricEvaluationRequest, CustomMetricDefinition, EvaluationIterationResponse
-from database.model.evaluation import CustomMetric
+from service.evaluation.schemas import CustomMetricRequest, CustomMetricEvaluationRequest, CustomMetricDefinition
 
 
 class TestCustomMetrics:

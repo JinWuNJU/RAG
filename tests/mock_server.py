@@ -6,10 +6,9 @@
 提供模拟的API响应，避免在测试中调用真实的外部服务
 """
 
-import json
 import asyncio
 from typing import Dict, Any, Optional
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 

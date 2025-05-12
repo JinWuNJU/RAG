@@ -1,7 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any, Union
-from uuid import UUID
-from datetime import datetime
+from typing import List, Optional, Dict, Any
 
 class Metric(BaseModel):
     id: str  # 指标的唯一标识符

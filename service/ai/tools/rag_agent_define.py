@@ -3,7 +3,7 @@ import json
 from typing import List
 import uuid
 from pydantic_ai import RunContext, Agent
-from pydantic_ai.tools import Tool, ToolDefinition
+from pydantic_ai.tools import ToolDefinition
 from pydantic_core import to_jsonable_python
 from database import get_db_with
 from database.model.knowledge_base import KnowledgeBaseChunk

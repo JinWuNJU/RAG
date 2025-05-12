@@ -3,13 +3,13 @@ import sys
 import uuid
 import pytest
 from datetime import datetime
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, MagicMock
 
 # 添加项目根目录到系统路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from service.evaluation.service import EvaluationService, SimplePromptEvaluator
-from service.evaluation.router import create_evaluation_task, get_tasks, get_task_records, delete_task
+from service.evaluation.router import create_evaluation_task, get_tasks, delete_task
 from service.evaluation.schemas import EvaluationRequest, EvaluationTasksResponse
 
 

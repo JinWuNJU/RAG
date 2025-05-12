@@ -1,5 +1,5 @@
 # database/model/evaluation.py
-from sqlalchemy import Column, String, JSON, DateTime, ForeignKey, Boolean
+from sqlalchemy import String, JSON, DateTime, ForeignKey, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from database.model import Base
 from sqlalchemy.orm import Mapped, mapped_column, relationship

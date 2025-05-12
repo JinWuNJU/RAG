@@ -2,7 +2,6 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import List
 
-from fastapi import BackgroundTasks
 from sse_starlette import EventSourceResponse
 
 from rest_model.chat.completions import MessagePayload

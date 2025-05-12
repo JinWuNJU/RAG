@@ -3,7 +3,7 @@ from typing import Tuple
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Response
 from fastapi_jwt_auth2 import AuthJWT
 from sklearn.preprocessing import MinMaxScaler
-from sqlalchemy import text, exc, func, distinct
+from sqlalchemy import text, exc, func
 
 from database import get_db
 from database.model.knowledge_base import *

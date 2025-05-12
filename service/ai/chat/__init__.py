@@ -1,6 +1,6 @@
 import os
 
-from fastapi import APIRouter, Depends, BackgroundTasks
+from fastapi import APIRouter, Depends
 from fastapi_jwt_auth2 import AuthJWT
 
 from rest_model.chat.completions import MessagePayload
