@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
-from sqlalchemy import CheckConstraint, Boolean, Index, String, Integer, Float, DateTime, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, Boolean, Index, String, Integer, Float, DateTime, ForeignKey, Text, \
+    UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from pgvector.sqlalchemy import Vector
 from sqlalchemy.sql import func
@@ -34,9 +35,14 @@ class KnowledgeBase(Base):
         CheckConstraint('chunk_size > 0', name='check_chunk_size_positive'),
         CheckConstraint('overlap_size >= 0', name='check_overlap_size_non_negative'),
         CheckConstraint('hybrid_ratio BETWEEN 0 AND 1', name='check_hybrid_ratio_range'),
-        
+
         # Index on status column
         Index('idx_knowledge_bases_status', 'status'),
+        Index(
+            'ix_knowledge_bases_name_pgroonga',
+            text('name pgroonga_text_term_search_ops_v2'),  # 关键修改
+            postgresql_using='pgroonga'
+        ),
     )
 
 class KnowledgeBaseChunk(Base):

@@ -1,6 +1,6 @@
 from typing import Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Response
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Response, Query
 from fastapi_jwt_auth2 import AuthJWT
 from sklearn.preprocessing import MinMaxScaler
 from sqlalchemy import text, exc, func
@@ -84,59 +84,54 @@ async def create_knowledge_base(
         raise HTTPException(500, detail=str(e))
 
 
-@router.get("/",response_model=List[KnowledgeBaseListItem])
+@router.get("/", response_model=PaginatedResponse)
 async def list_knowledge_bases(
-        db: Session = Depends(get_db),
-        Authorize: AuthJWT = Depends(),
-        skip: int = 0,
-        limit: int = 100
-) -> List[KnowledgeBaseListItem]:
-    """
-    获取知识库列表API
-
-    参数:
-    - skip: 跳过的记录数（用于分页），默认为0
-    - limit: 每页返回的最大记录数，默认为100，最大1000
-
-    返回:
-    - List[KnowledgeBaseListItem]: 知识库基本信息列表，包含:
-      - knowledge_base_id: 知识库唯一标识
-      - name: 知识库名称
-      - description: 知识库描述（可选）
-      - created_at: 创建时间(ISO 8601格式)
-      - status: 知识库状态（building/completed）
-
-
-    错误码:
-    - 500: 服务器内部错误
-    """
+    db: Session = Depends(get_db),
+    Authorize: AuthJWT = Depends(),
+    name: Optional[str] = Query(None, min_length=1),  # 新增关键词参数
+    page: int = Query(0, ge=0),                       # 分页参数标准化
+    limit: int = Query(10, ge=1, le=1000)            # 限制最大1000
+):
     user_id = auth.decode_jwt_to_uid(Authorize)
     try:
-        # 构建查询条件
+        # 基础查询条件
         query = db.query(KnowledgeBase).filter(
-            (KnowledgeBase.is_public == True) |  # 公开的知识库
-            (KnowledgeBase.uploader_id == user_id)  # 或当前用户上传的
+            (KnowledgeBase.is_public == True) |
+            (KnowledgeBase.uploader_id == user_id)
         )
 
-        # 执行查询（按创建时间倒序）
-        knowledge_bases = query.order_by(KnowledgeBase.created_at.desc()) \
-            .offset(skip) \
-            .limit(limit) \
-            .all()
-
-        # 转换为响应模型
-        return [
-            KnowledgeBaseListItem(
-                knowledge_base_id=kb.id,
-                name=kb.name,
-                description=kb.description,
-                created_at=kb.created_at,
-                status=kb.status,
-                uploader_id=kb.uploader_id,
-                is_public=kb.is_public
+        if name:
+            query = query.filter(
+                KnowledgeBase.name.op('&@~')(name)  # 直接使用列操作符
             )
-            for kb in knowledge_bases
-        ]
+
+        # 分页计算
+        total = query.count()
+        total_pages = (total + limit - 1) // limit  # 向上取整
+
+        # 执行分页查询
+        knowledge_bases = query.order_by(KnowledgeBase.created_at.desc())\
+                               .offset(page * limit)\
+                               .limit(limit)\
+                               .all()
+
+        return PaginatedResponse(
+            items=[
+                KnowledgeBaseListItem(
+                    knowledge_base_id=kb.id,
+                    name=kb.name,
+                    description=kb.description,
+                    created_at=kb.created_at,
+                    status=kb.status,
+                    uploader_id=kb.uploader_id,
+                    is_public=kb.is_public
+                ) for kb in knowledge_bases
+            ],
+            total=total,
+            page=page,
+            limit=limit,
+            total_pages=total_pages
+        )
 
     except Exception as e:
         logger.error(f"获取知识库列表失败: {str(e)}")

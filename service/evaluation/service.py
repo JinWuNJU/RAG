@@ -559,7 +559,7 @@ class EvaluationService:
 
         return Result(scores=scores)
 
-    def get_all_tasks(self, user_id: UUID, skip: int = 0, limit: int = 10, is_rag_task: Optional[bool] = None):
+    def get_all_tasks(self, user_id: UUID, skip: int = 0, limit: int = 10, is_rag_task: Optional[bool] = None,name: Optional[str] = None):
         """获取用户所有评估任务，可以根据是否为RAG任务进行筛选"""
         # 构建基本查询
         query = self.db.query(EvaluationTask).filter(
@@ -569,7 +569,12 @@ class EvaluationService:
         # 如果指定了is_rag_task参数，根据参数值筛选任务
         if is_rag_task is not None:
             query = query.filter(EvaluationTask.is_rag_task == is_rag_task)
-            
+
+        if name:
+            query = query.filter(
+                EvaluationTask.name.op('&@~')(name)  # PGroonga全文搜索
+            )
+
         # 获取任务列表
         tasks = query.order_by(
             EvaluationTask.created_at.desc()

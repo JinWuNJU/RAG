@@ -82,6 +82,7 @@ async def get_tasks(
         page: int = 1,
         page_size: int = 10,
         is_rag_task: Optional[bool] = None,
+        name: Optional[str] = None,
         Authorize: AuthJWT = Depends(),
         db: Session = Depends(get_db)
 ):
@@ -90,7 +91,7 @@ async def get_tasks(
     service = EvaluationService(db)
 
     skip = (page - 1) * page_size
-    result = service.get_all_tasks(user_id, skip, page_size, is_rag_task)
+    result = service.get_all_tasks(user_id, skip, page_size, is_rag_task,name)
 
     return EvaluationTasksResponse(
         tasks=[EvaluationTaskItem(**task) for task in result["tasks"]],

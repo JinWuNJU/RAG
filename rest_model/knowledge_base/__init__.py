@@ -19,10 +19,18 @@ class KnowledgeBaseCreateResponse(BaseModel):
     knowledge_base_id: UUID
     status: str
 
+class KnowledgeBaseListRequest(BaseModel):
+    """知识库列表请求模型"""
+    name: Optional[str] = None
+    page: int = 0
+    limit: int = 10
+
 class KnowledgeBaseBasicInfo(BaseModel):
     knowledge_base_id: UUID
     name: str
     description: Optional[str]
+
+
 
 class KnowledgeBaseListItem(KnowledgeBaseBasicInfo):
     """知识库列表项响应模型"""
@@ -35,6 +43,13 @@ class KnowledgeBaseListItem(KnowledgeBaseBasicInfo):
         json_encoders = {
             datetime: lambda v: v.isoformat()  # 确保datetime序列化
         }
+
+class PaginatedResponse(BaseModel):
+    items: List[KnowledgeBaseListItem]
+    total: int
+    page: int
+    limit: int
+    total_pages: int
 
 class KnowledgeBaseFile(BaseModel):
     """知识库文件响应模型"""
