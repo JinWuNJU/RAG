@@ -3,7 +3,7 @@ from typing import Tuple
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Response, Query
 from fastapi_jwt_auth2 import AuthJWT
 from sklearn.preprocessing import MinMaxScaler
-from sqlalchemy import text, exc, func
+from sqlalchemy import desc, text, exc, func
 
 from database import get_db
 from database.model.knowledge_base import *
@@ -110,9 +110,11 @@ async def list_knowledge_bases(
         total_pages = (total + limit - 1) // limit  # 向上取整
 
         # 执行分页查询
-        knowledge_bases = query.order_by(KnowledgeBase.created_at.desc())\
-                               .offset(page * limit)\
-                               .limit(limit)\
+        knowledge_bases = query.order_by(
+                                desc(KnowledgeBase.uploader_id == user_id), 
+                                KnowledgeBase.created_at.desc()) \
+                               .offset(page * limit) \
+                               .limit(limit) \
                                .all()
 
         return PaginatedResponse(
