@@ -59,7 +59,7 @@ deploy-job:
     - cd $DEPLOY_DIR
     - source .venv/bin/activate
     - echo "Starting new server..."
-    - nohup uvicorn server:app --host 0.0.0.0 --port 8000 --reload > server.log 2>&1 &
+    - nohup uvicorn server:app --host 0.0.0.0 --port 8000 --workers 4 > server.log 2>&1 &
 
 pyright-job:
   stage: pyright
