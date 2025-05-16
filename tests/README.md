@@ -1,21 +1,21 @@
 # RAG后端单元测试
 
-本目录包含RAG后端项目的单元测试，特别关注评估功能的测试。
+本目录包含RAG后端项目的单元测试。
 
 ## 测试文件结构
 
 - `conftest.py` - 包含共享的测试fixture，设置测试环境、模拟JWT认证和数据库会话
-- `test_evaluation.py` - 测试Prompt评估功能
-- `test_rag_evaluation.py` - 测试RAG评估功能
-- `test_custom_metrics.py` - 测试自定义评估指标功能
-- `test_rag_simple.py` - 测试RAG简单功能和辅助函数
-- `test_end_to_end.py` - 测试完整评估流程，使用实际用户ID
-- `test_prompt_evaluator.py` - 专门测试SimplePromptEvaluator类
-- `mock_server.py` - 提供模拟API服务器用于测试
+- `evaluation/` - 评估功能相关测试目录
+  - `test_evaluation.py` - 测试Prompt评估功能
+  - `test_rag_evaluation.py` - 测试RAG评估功能
+  - `test_custom_metrics.py` - 测试自定义评估指标功能
+  - `test_rag_simple.py` - 测试RAG简单功能和辅助函数
+  - `test_prompt_evaluator.py` - 测试SimplePromptEvaluator类
+  - `__init__.py` - 标识评估测试为Python包
 
 ## 测试设计
 
-测试使用了unittest.mock模块模拟数据库连接、JWT认证和服务调用，避免实际调用外部API。测试覆盖了评估功能的完整流程，包括：
+测试使用了unittest.mock模块模拟数据库连接、JWT认证和服务调用，避免实际调用外部API，但保留了真实的业务逻辑。测试覆盖了评估功能的完整流程，包括：
 
 1. 创建评估任务
 2. 获取评估结果
@@ -23,6 +23,7 @@
 4. 删除评估任务
 5. 自定义评估指标创建和使用
 
+我们对模拟调用使用固定的返回值，并设置了随机数种子，确保测试结果的一致性和可重复性。
 
 ## 运行测试
 
@@ -31,15 +32,6 @@
 ```bash
 # 运行所有测试
 pytest
-
-# 运行特定测试文件
-pytest tests/test_evaluation.py
-
-# 运行特定测试类
-pytest tests/test_evaluation.py::TestEvaluationService
-
-# 运行特定测试方法
-pytest tests/test_evaluation.py::TestEvaluationService::test_evaluate
 ```
 
 ## 测试依赖
@@ -49,6 +41,7 @@ pytest tests/test_evaluation.py::TestEvaluationService::test_evaluate
 - pytest
 - pytest-asyncio
 - unittest.mock
+- numpy (用于随机数生成和固定随机种子)
 
 ## 测试覆盖范围
 
@@ -81,10 +74,21 @@ pytest tests/test_evaluation.py::TestEvaluationService::test_evaluate
    - 标准评估完整流程（创建→获取→删除）
    - RAG评估完整流程（创建→迭代→获取）
    - 自定义指标完整流程（创建→获取→评估）
-   - 使用实际用户ID进行测试
+
+## 测试稳定性
+
+为确保测试结果的稳定性和可重复性，我们采取了以下措施：
+
+1. 使用固定的随机数种子
+2. 使用固定的UUID和时间戳
+3. 模拟外部调用返回固定值
+4. 使用确定性断言而非范围断言
+5. 确保数据结构与实际代码期望保持一致
 
 ## 常见问题解决
 
 1. **导入错误**：如果遇到导入错误，确保已将项目根目录添加到系统路径中
 2. **数据库连接问题**：测试使用模拟数据库会话，不需要实际连接数据库
 3. **异步测试问题**：确保使用了`pytest.mark.asyncio`装饰器和`pytest-asyncio`插件 
+4. **随机失败**：如果测试随机失败，检查是否所有的随机性都被固定了种子控制
+5. **LLM API调用**：确保所有LLM API调用都被正确模拟，避免实际调用外部服务 

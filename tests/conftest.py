@@ -16,7 +16,7 @@ from database.model.evaluation import EvaluationTask, EvaluationRecord, CustomMe
 def mock_db():
     """模拟数据库会话"""
     mock_session = MagicMock(spec=Session)
-    
+
     # 模拟查询构建器
     mock_query = MagicMock()
     mock_session.query.return_value = mock_query
@@ -27,7 +27,7 @@ def mock_db():
     mock_query.order_by.return_value = mock_query
     mock_query.offset.return_value = mock_query
     mock_query.limit.return_value = mock_query
-    
+
     return mock_session
 
 
@@ -115,14 +115,14 @@ def mock_evaluation_service():
     """模拟评估服务"""
     with patch('service.evaluation.service.EvaluationService') as mock:
         service_instance = mock.return_value
-        
+
         # 模拟评估方法，使用固定值与测试保持一致
         service_instance.evaluate.return_value = {
             "accuracy": 0.85,
             "relevancy": 0.88,
             "completeness": 0.91
         }
-        
+
         # 模拟RAG评估方法，返回固定值与测试保持一致
         from collections import namedtuple
         Result = namedtuple('Result', ['scores'])
@@ -131,12 +131,12 @@ def mock_evaluation_service():
             "context_relevancy": [0.88],
             "context_precision": [0.91]
         })
-        
+
         # 模拟特定评估方法
         service_instance._evaluate_faithfulness = AsyncMock(return_value=[0.87])
         service_instance._evaluate_context_relevancy = AsyncMock(return_value=[0.88])
         service_instance._evaluate_context_precision = AsyncMock(return_value=[0.91])
-        
+
         # 模拟获取任务方法
         service_instance.get_all_tasks.return_value = {
             "tasks": [
@@ -150,7 +150,7 @@ def mock_evaluation_service():
             ],
             "total": 1
         }
-        
+
         # 模拟获取任务记录方法
         service_instance.get_task_records.return_value = [
             {
@@ -163,5 +163,5 @@ def mock_evaluation_service():
                 "results": {"accuracy": 0.85}
             }
         ]
-        
-        yield service_instance 
+
+        yield service_instance
