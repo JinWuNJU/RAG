@@ -6,7 +6,7 @@ from pydantic_ai import RunContext, Agent
 from pydantic_ai.tools import ToolDefinition
 from pydantic_core import to_jsonable_python
 from database import get_db_with
-from database.model.knowledge_base import KnowledgeBaseChunk
+from database.model.knowledge_base import KnowledgeBaseChunk, KnowledgeBase
 from rest_model.knowledge_base import KnowledgeBaseBasicInfo, SearchRequest, SearchResult
 from service.knowledge_base.knowledge_base_router import get_text_search_results, get_vector_search_results, get_hybrid_search_results
 
@@ -106,7 +106,7 @@ async def hybrid_search(ctx: RunContext[List[KnowledgeBaseBasicInfo]], knowledge
     if not valid:
         return reason
     with get_db_with() as db:
-        kb = db.query(KnowledgeBaseBasicInfo).get(knowledge_base_id)
+        kb = db.query(KnowledgeBase).get(knowledge_base_id)
         if not kb:
             return "知识库ID错误"
         result = await get_hybrid_search_results(kb, SearchRequest(query=keyword, limit=limit), db)
