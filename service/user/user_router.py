@@ -11,6 +11,7 @@ from database.model.user import *
 from . import auth
 from rest_model.user import *
 from database import get_db
+from ..limit import rate_limit
 
 router = APIRouter(tags=["user"], prefix="/user")
 
@@ -36,7 +37,9 @@ def authjwt_exception_handler(request: Request, exc: Exception):
 
 # 注册接口
 @router.post("/register", response_model=TokenResponse)
+@rate_limit(ip_limit="20/minute")
 async def register(
+    request: Request,
     user: UserCreate,
     Authorize: AuthJWT = Depends(),
     db: Session = Depends(get_db)
@@ -65,7 +68,9 @@ async def register(
 
 # 登录接口
 @router.post("/login", response_model=TokenResponse)
+@rate_limit(ip_limit="20/minute")
 async def login(
+    request: Request,
     user: UserLogin,
     Authorize: AuthJWT = Depends(),
     db: Session = Depends(get_db)
@@ -85,7 +90,11 @@ async def login(
 
 # JWT 测试接口
 @router.get("/test")
-def test_jwt(Authorize: AuthJWT = Depends()):
+@rate_limit(ip_limit="30/minute", user_limit="15/minute")
+async def test_jwt(
+    request: Request,
+    Authorize: AuthJWT = Depends()
+):
     # 验证JWT令牌
     user_id = auth.decode_jwt_to_uid(Authorize)
     return {

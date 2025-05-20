@@ -4,7 +4,7 @@ import threading
 from uuid import UUID
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
 from fastapi_jwt_auth2 import AuthJWT
 from loguru import logger
 
@@ -33,6 +33,7 @@ from database import get_db
 from . import router as evaluation_router
 from ..user.auth import decode_jwt_to_uid
 from ..user.user_router import router as user_router
+from ..limit import rate_limit
 
 __all__ = ["evaluation_router", "user_router"]
 router = APIRouter(tags=["evaluation"], prefix="/evaluation")
@@ -78,7 +79,9 @@ async def get_metrics(db: Session = Depends(get_db), type: Optional[str] = None)
 
 
 @router.get("/tasks", response_model=EvaluationTasksResponse)
+@rate_limit(ip_limit="50/minute", user_limit="30/minute")
 async def get_tasks(
+        request: Request,
         page: int = 1,
         page_size: int = 10,
         is_rag_task: Optional[bool] = None,
@@ -100,7 +103,9 @@ async def get_tasks(
 
 
 @router.get("/tasks/{task_id}/records", response_model=list[EvaluationRecordResponse])
+@rate_limit(ip_limit="40/minute", user_limit="20/minute")
 async def get_task_records(
+        request: Request,
         task_id: UUID,
         Authorize: AuthJWT = Depends(),
         db: Session = Depends(get_db)
@@ -114,7 +119,9 @@ async def get_task_records(
 
 
 @router.get("/records/{record_id}", response_model=EvaluationRecordResponse)
+@rate_limit(ip_limit="40/minute", user_limit="20/minute")
 async def get_record_detail(
+        request: Request,
         record_id: UUID,
         Authorize: AuthJWT = Depends(),
         db: Session = Depends(get_db)
@@ -134,8 +141,10 @@ async def get_record_detail(
 
 
 @router.post("/tasks", response_model=EvaluationTaskCreateResponse)
+@rate_limit(ip_limit="15/minute", user_limit="10/minute")
 async def create_evaluation_task(
-        request: EvaluationRequest,
+        request: Request,
+        evaluation_request: EvaluationRequest,
         Authorize: AuthJWT = Depends(),
         db: Session = Depends(get_db)
 ):
@@ -150,24 +159,24 @@ async def create_evaluation_task(
     service = EvaluationService(db)
     
     # 添加详细日志
-    print(f"收到评估任务创建请求 - 用户ID: {user_id}, 指标: {request.metric_id}")
-    print(f"请求数据: {request.dict()}")
+    print(f"收到评估任务创建请求 - 用户ID: {user_id}, 指标: {evaluation_request.metric_id}")
+    print(f"请求数据: {evaluation_request.dict()}")
 
     # 2. 验证文件存在
     try:
         file_record = db.query(FileDB).filter(
-            FileDB.id == request.file_id,
+            FileDB.id == evaluation_request.file_id,
             FileDB.user_id == user_id  # 确保用户只能访问自己的文件
         ).first()
 
         if not file_record:
-            print(f"文件不存在或无权访问: {request.file_id}, 用户: {user_id}")
+            print(f"文件不存在或无权访问: {evaluation_request.file_id}, 用户: {user_id}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="文件不存在或无权访问"
             )
         
-        print(f"文件验证成功: {request.file_id}")
+        print(f"文件验证成功: {evaluation_request.file_id}")
 
         # 3. 创建数据库记录
         task_id = uuid.uuid4()
@@ -177,7 +186,7 @@ async def create_evaluation_task(
             # 创建任务
             task = EvaluationTask(
                 id=task_id,
-                name=request.task_name,
+                name=evaluation_request.task_name,
                 user_id=user_id,
                 status="processing",
                 created_at=get_beijing_time()
@@ -188,9 +197,9 @@ async def create_evaluation_task(
             record = EvaluationRecord(
                 id=record_id,
                 task_id=task_id,
-                metric_id=request.metric_id,
-                system_prompt=request.system_prompt,
-                file_id=UUID(request.file_id),
+                metric_id=evaluation_request.metric_id,
+                system_prompt=evaluation_request.system_prompt,
+                file_id=UUID(evaluation_request.file_id),
                 created_at=get_beijing_time()
             )
             db.add(record)
@@ -233,9 +242,9 @@ async def create_evaluation_task(
                         await run_evaluation_async(
                             db=local_db,
                             record_id=record_id,
-                            file_id=request.file_id,
-                            metric_id=request.metric_id,
-                            system_prompt=request.system_prompt
+                            file_id=evaluation_request.file_id,
+                            metric_id=evaluation_request.metric_id,
+                            system_prompt=evaluation_request.system_prompt
                         )
                     finally:
                         pass
