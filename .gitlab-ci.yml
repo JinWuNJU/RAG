@@ -1,4 +1,5 @@
 stages:          # List of stages for jobs, and their order of execution
+  - backup_db
   - install
   - test
   - deploy
@@ -7,6 +8,23 @@ stages:          # List of stages for jobs, and their order of execution
 variables:
     DEPLOY_DIR: "/home/gitlab-runner/ragbackend"
     APP_USER: "gitlab-runner"
+
+backup-job:
+  stage: backup_db
+  tags:
+    - ragback
+  script:
+    - echo "Creating backup directory in container..."
+    - sudo docker exec vectorsearch mkdir -p /var/lib/postgresql/data/backup
+    - echo "Backing up PostgreSQL database..."
+    - BACKUP_FILE=backup_$(date +%Y%m%d_%H%M%S).dump
+    - export PGPASSWORD="$DB_PASS"
+    - sudo docker exec -e PGPASSWORD="$DB_PASS" vectorsearch pg_dump -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -F c -b -v -f /var/lib/postgresql/data/backup/$BACKUP_FILE
+    - echo "Creating ~/db_backup on host..."
+    - mkdir -p ~/db_backup
+    - echo "Copying backup file from container to host..."
+    - sudo docker cp vectorsearch:/var/lib/postgresql/data/backup/$BACKUP_FILE ~/db_backup/
+    - echo "Backup completed."
 
 install-job:      # This job runs in the install stage.
   stage: install
@@ -27,7 +45,8 @@ install-job:      # This job runs in the install stage.
     - source .venv/bin/activate
     - pip install uv
     - uv pip install -r requirements.txt
-
+  except:
+    - schedules
 
 test-job:
   stage: test
@@ -49,6 +68,8 @@ test-job:
       coverage_report:
         coverage_format: cobertura
         path: coverage.xml
+  except:
+    - schedules
 
 deploy-job:
   stage: deploy
@@ -61,6 +82,8 @@ deploy-job:
     - source .venv/bin/activate
     - echo "Starting new server..."
     - nohup uvicorn server:app --host 0.0.0.0 --port 8000 --workers 4 > server.log 2>&1 &
+  except:
+    - schedules
 
 pyright-job:
   stage: pyright
@@ -75,3 +98,5 @@ pyright-job:
     - echo "Running pyright..."
     - pyright || true # pyright will return a non-zero exit code if there are errors, but we want to capture the output regardless.
     - echo "Pyright completed."
+  except:
+    - schedules
