@@ -8,17 +8,11 @@ import uuid
 from utils.datetime_tools import get_beijing_time, to_timestamp_ms  # 导入工具函数
 import numpy as np
 from collections import namedtuple
-import nltk
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 import math
 
 from database.model.evaluation import EvaluationTask, EvaluationRecord
-
-# 全局标志 - 由于NLTK 3.8.1版本问题，直接禁用平滑函数
-DISABLE_NLTK = True  # 直接禁用NLTK
-DISABLE_SMOOTHING = True  # 强制禁用平滑函数
-
 # 辅助函数定义
 def _get_ngrams(tokens, n):
     """生成n-gram列表"""
@@ -26,7 +20,6 @@ def _get_ngrams(tokens, n):
 
 def calculate_bleu_score(reference, candidate):
     """计算BLEU分数，比较参考答案和生成答案的相似度"""
-    # 直接禁用NLTK，改用自己的实现
     # 对中文分词，如果是英文，可以使用split()
     try:
         import jieba
@@ -124,31 +117,6 @@ def calculate_simple_similarity(reference, candidate):
 def set_disable_smoothing(value):
     global DISABLE_SMOOTHING
     DISABLE_SMOOTHING = value
-
-# 确保下载nltk所需数据
-try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    try:
-        nltk.download('punkt')
-        logger.info("成功下载nltk punkt tokenizer")
-    except Exception as e:
-        logger.error(f"无法下载nltk数据: {str(e)}")
-
-# 验证BLEU计算兼容性
-try:
-    # 测试我们的自定义BLEU实现
-    test_ref = "这是一个测试句子"
-    test_hyp = "这是测试"
-    
-    # 测试自定义BLEU计算
-    test_score = calculate_bleu_score(test_ref, test_hyp)
-    #logger.info(f"自定义BLEU计算测试成功: {test_score}")
-except Exception as e:
-    #logger.warning(f"自定义BLEU计算测试失败: {str(e)} - 将使用备选算法")
-    # 强制使用备选算法
-    def calculate_bleu_score(reference, candidate):
-        return calculate_simple_similarity(reference, candidate)
 
 class SimplePromptEvaluator:
     """简单的Prompt评估器 - 使用裁判LLM评价生成结果与参考答案的质量"""

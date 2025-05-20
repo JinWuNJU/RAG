@@ -25,7 +25,6 @@ pydantic_core~=2.27.2
 datasets~=3.5.0
 tenacity~=9.0.0
 numpy~=2.2.4
-nltk~=3.9.1
 scikit-learn~=1.5.2
 nest_asyncio
 extractous~=0.3.0
