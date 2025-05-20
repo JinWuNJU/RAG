@@ -16,10 +16,11 @@ install-job:      # This job runs in the install stage.
     - echo "Stopping old server..."
     - if pgrep -f "uvicorn server" > /dev/null; then sudo pkill -f "uvicorn server"; else echo "No old server process found."; fi
     - echo "Creating deployment directory..."
+    - sudo rm -rf $DEPLOY_DIR
     - sudo mkdir -p $DEPLOY_DIR
     - sudo chown -R $APP_USER:$APP_USER $DEPLOY_DIR
     - echo "Copying project files..."
-    - cp -r $CI_PROJECT_DIR/* $DEPLOY_DIR/
+    - sudo cp -r $CI_PROJECT_DIR/* $DEPLOY_DIR/
     - echo "Creating and activating virtual environment..."
     - cd $DEPLOY_DIR
     - python3 -m venv .venv
