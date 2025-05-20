@@ -230,3 +230,79 @@ class TestEvaluationService:
         # 验证数据库操作
         mock_db.delete.assert_called()
         mock_db.commit.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_delete_task_exception(self, mock_db, test_user_id):
+        """
+        测试删除任务异常场景：任务不存在/无权访问 和 数据库异常
+        """
+        from service.evaluation.service import EvaluationService
+        import uuid
+        # 1. 任务不存在或无权访问
+        task_id = uuid.uuid4()
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+        service = EvaluationService(mock_db)
+        result = service.delete_task(task_id, test_user_id)
+        assert result["success"] is False
+        assert "不存在" in result["message"]
+
+        # 2. 数据库异常
+        mock_db.query.return_value.filter.return_value.first.side_effect = Exception("db error")
+        service = EvaluationService(mock_db)
+        result = service.delete_task(task_id, test_user_id)
+        assert result["success"] is False
+        assert "删除任务失败" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_evaluate_cases(self, mock_db):
+        """
+        覆盖evaluate方法的主要分支，包括：未知指标、无生成回答、各实现分支、异常分支
+        """
+        service = EvaluationService(mock_db)
+        questions = ["Q1"]
+        answers = ["A1"]
+        generated = ["G1"]
+
+        # 1. 指标不存在，直接跳过
+        result = await service.evaluate(questions, answers, ["not_exist_metric"], generated)
+        assert "not_exist_metric" not in result.scores or result.scores["not_exist_metric"] in [0.7, 0.8, 0.9]
+
+        # 2. 没有生成回答，走mock分支
+        res = await service.evaluate(questions, answers, ["prompt_scs"], [])
+        assert "prompt_scs" in res.scores
+        # 分数为float或list
+        assert isinstance(res.scores["prompt_scs"], (float, list))
+
+        # 3. custom_prompt_scoring分支，mock _evaluate_with_prompt_scs
+        with patch.object(service, '_evaluate_with_prompt_scs', AsyncMock(return_value=[0.88])):
+            out = await service.evaluate(questions, answers, ["prompt_scs"], generated)
+            assert out.scores["prompt_scs"] == [0.88]
+
+        # 4. bleu_scoring分支，mock _evaluate_with_bleu
+        service.metrics["bleu"] = {"implementation": "bleu_scoring"}
+        with patch.object(service, '_evaluate_with_bleu', return_value=[0.66]):
+            out = await service.evaluate(questions, answers, ["bleu"], generated)
+            assert out.scores["bleu"] == [0.66]
+
+        # 5. custom_relevancy_scoring分支，mock _evaluate_relevancy
+        service.metrics["answer_relevancy"] = {"implementation": "custom_relevancy_scoring"}
+        with patch.object(service, '_evaluate_relevancy', AsyncMock(return_value=[0.77])):
+            out = await service.evaluate(questions, answers, ["answer_relevancy"], generated)
+            assert out.scores["answer_relevancy"] == [0.77]
+
+        # 6. custom_metric_evaluation分支，mock _evaluate_with_custom_metric
+        service.metrics["custom_metric"] = {"implementation": "custom_metric_evaluation"}
+        with patch.object(service, '_evaluate_with_custom_metric', AsyncMock(return_value=[0.99])):
+            out = await service.evaluate(questions, answers, ["custom_metric"], generated)
+            assert out.scores["custom_metric"] == [0.99]
+
+        # 7. 传入不支持的评估方法，异常分支
+        service.metrics["unknown_impl"] = {"implementation": "not_supported_impl"}
+        out = await service.evaluate(questions, answers, ["unknown_impl"], generated)
+        assert "unknown_impl" in out.scores
+
+        # 8. 异常分支
+        service.metrics["prompt_scs"] = {"implementation": "custom_prompt_scoring"}
+        with patch.object(service, '_evaluate_with_prompt_scs', AsyncMock(side_effect=Exception("fail"))):
+            out = await service.evaluate(questions, answers, ["prompt_scs"], generated)
+            assert "prompt_scs" in out.scores

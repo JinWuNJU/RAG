@@ -32,25 +32,36 @@ class TestSimplePromptEvaluator:
     @pytest.mark.asyncio
     async def test_evaluate_answer(self):
         """
-        测试评价答案
+        测试评价答案 - LLM返回合法分数
         """
-        # 创建评估器并模拟其方法
-        evaluator = MagicMock(spec=SimplePromptEvaluator)
-        evaluator.evaluate_answer = AsyncMock(return_value=0.85)
-        
-        # 测试数据
-        question = "什么是人工智能？"
-        reference = "人工智能是计算机科学的一个分支，致力于创建能够模拟人类智能的系统。"
-        generated = "人工智能是研究如何使计算机能够像人一样思考和学习的科学。"
-        
-        # 调用评估方法
-        score = await evaluator.evaluate_answer(question, reference, generated)
-        
-        # 验证结果
-        assert score == 0.85
-        
-        # 验证调用参数
-        evaluator.evaluate_answer.assert_called_once_with(question, reference, generated)
+        with patch('service.evaluation.service.ChatOpenAI', return_value=MagicMock()):
+            with patch('service.evaluation.service.ChatPromptTemplate.from_messages', return_value=MagicMock()):
+                evaluator = SimplePromptEvaluator("fake_api_key", "https://fake-api.com", "test-model")
+                # mock chain.ainvoke 返回合法分数
+                mock_response = MagicMock()
+                mock_response.content = "8.5"
+                evaluator.chain = MagicMock()
+                evaluator.chain.ainvoke = AsyncMock(return_value=mock_response)
+
+                score = await evaluator.evaluate_answer("问题", "参考", "生成")
+                assert score == 0.85
+
+    @pytest.mark.asyncio
+    async def test_evaluate_answer_with_invalid_response(self):
+        """
+        测试处理无效响应 - LLM返回无法解析的内容
+        """
+        with patch('service.evaluation.service.ChatOpenAI', return_value=MagicMock()):
+            with patch('service.evaluation.service.ChatPromptTemplate.from_messages', return_value=MagicMock()):
+                evaluator = SimplePromptEvaluator("fake_api_key", "https://fake-api.com", "test-model")
+                # mock chain.ainvoke 返回非法分数
+                mock_response = MagicMock()
+                mock_response.content = "invalid"
+                evaluator.chain = MagicMock()
+                evaluator.chain.ainvoke = AsyncMock(return_value=mock_response)
+
+                score = await evaluator.evaluate_answer("问题", "参考", "生成")
+                assert score == 0.5
     
     @pytest.mark.asyncio
     async def test_evaluate_answer_with_numeric_response(self):
@@ -75,33 +86,6 @@ class TestSimplePromptEvaluator:
                     
                     # 验证结果 - 应该正确解析数字
                     assert score == 0.85
-    
-    @pytest.mark.asyncio
-    async def test_evaluate_answer_with_invalid_response(self):
-        """
-        测试处理无效响应 - 手动模拟
-        """
-        # 创建评估器实例，但不使用实际实现的方法
-        evaluator = SimplePromptEvaluator("fake_api_key", "https://fake-api.com", "test-model")
-        
-        # 直接模拟evaluate_answer方法
-        original_method = evaluator.evaluate_answer
-        
-        try:
-            # 临时替换方法
-            evaluator.evaluate_answer = AsyncMock(return_value=0.5)
-            
-            # 调用评估方法
-            score = await evaluator.evaluate_answer("测试问题", "测试参考", "测试生成")
-            
-            # 验证结果 - 应该返回0.5
-            assert score == 0.5
-            
-            # 验证调用
-            evaluator.evaluate_answer.assert_called_once()
-        finally:
-            # 恢复原方法
-            evaluator.evaluate_answer = original_method
     
     @pytest.mark.asyncio
     async def test_evaluate_answer_with_exception_handling(self):
