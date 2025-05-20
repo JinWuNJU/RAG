@@ -1,5 +1,5 @@
 from typing import TYPE_CHECKING
-from sqlalchemy import String
+from sqlalchemy import String,Integer
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -16,6 +16,7 @@ class User(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     password: Mapped[str] = mapped_column(String(100), nullable=False)
+    knowledge_base_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     
     files: Mapped[list["FileDB"]] = relationship("FileDB", back_populates="user")
     knowledge_bases: Mapped[list["KnowledgeBase"]] = relationship("KnowledgeBase", back_populates="uploader")

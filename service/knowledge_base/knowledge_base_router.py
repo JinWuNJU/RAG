@@ -12,6 +12,7 @@ from rest_model.knowledge_base import *
 from .service import *
 from ..user import auth
 import urllib.parse
+from database.model.user import User
 
 # 创建知识库相关的API路由，设置标签和前缀
 router = APIRouter(tags=["Knowledge Bases"], prefix="/knowledge_bases")
@@ -51,6 +52,19 @@ async def create_knowledge_base(
     - 创建的知识库基本信息，包括knowledge_base_id和状态
     """
     user_id = auth.decode_jwt_to_uid(Authorize)
+
+    # 获取用户当前知识库数量
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    # 检查知识库数量限制（假设最大限制为10）
+    MAX_KB_PER_USER = 10
+    if user.knowledge_base_count >= MAX_KB_PER_USER:
+        raise HTTPException(
+            400,
+            detail=f"每个用户最多只能创建{MAX_KB_PER_USER}个知识库"
+        )
     # 创建知识库元数据
     try:
         # 创建知识库元数据
@@ -63,6 +77,9 @@ async def create_knowledge_base(
             is_public=data.is_public,
         )
         db.add(kb)
+
+        user.knowledge_base_count += 1
+
         db.commit()
         db.refresh(kb)
 
@@ -546,6 +563,11 @@ async def delete_knowledge_base(
                 status_code=404,
                 detail="知识库不存在或没有删除权限"
             )
+
+        # 获取用户并减少计数器
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            user.knowledge_base_count -= 1
 
         # 批量删除关联分块（性能优化）
         chunk_count = db.query(KnowledgeBaseChunk) \
