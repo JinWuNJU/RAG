@@ -5,7 +5,7 @@ from fastapi_jwt_auth2 import AuthJWT
 from sklearn.preprocessing import MinMaxScaler
 from sqlalchemy import desc, text, exc, func
 
-from database import get_db
+from database import get_db, get_db_with
 from database.model.knowledge_base import *
 from database.model.file import FileDB
 from rest_model.knowledge_base import *
@@ -84,7 +84,7 @@ async def create_knowledge_base(
         db.refresh(kb)
 
         # 提交后台处理任务
-        processor = TextFileProcessor(db)
+        processor = TextFileProcessor()
         background_tasks.add_task(
             processor.process_files,
             kb_id=kb.id,
@@ -434,12 +434,11 @@ async def check_search_status(db: Session = Depends(get_db)):
         raise HTTPException(503, detail=f"搜索引擎异常: {str(e)}")
 
 
-@router.put("/{knowledge_base_id}/rebuild", response_model=KnowledgeBaseCreateResponse)
+@router.put("/{knowledge_base_id}/rebuild")
 async def rebuild_knowledge_base(
         knowledge_base_id: UUID,
-        request: KnowledgeBaseCreate,
+        request: UpdateKnowledgeBaseParamsRequest,
         background_tasks: BackgroundTasks,
-        db: Session = Depends(get_db),
         Authorize: AuthJWT = Depends()
 ):
     """
@@ -466,63 +465,77 @@ async def rebuild_knowledge_base(
     返回:
     - 创建的知识库基本信息，包括knowledge_base_id和状态
     """
+    rebuild_required = False
     user_id = auth.decode_jwt_to_uid(Authorize)
-    kb = db.query(KnowledgeBase).filter(
-        (KnowledgeBase.id == knowledge_base_id) &
-         (KnowledgeBase.uploader_id == user_id)
-    ).first()
 
-    if not kb:
-        raise HTTPException(
-            status_code=404,
-            detail=f"知识库{knowledge_base_id}不存在或没有权限修改"
-        )
-    try:
+    with get_db_with() as db:
+        kb = db.query(KnowledgeBase).filter(
+            (KnowledgeBase.id == knowledge_base_id) &
+            (KnowledgeBase.uploader_id == user_id)
+        ).with_for_update().first()
 
-        # 删除旧的分块数据（批量删除提高性能）
-        deleted_count = db.query(KnowledgeBaseChunk) \
-            .filter_by(knowledge_base_id=knowledge_base_id) \
-            .delete(synchronize_session=False)
-        logger.info(f"Deleted {deleted_count} old chunks for KB {knowledge_base_id}")
-
-        # 更新知识库参数
-        kb.chunk_size = request.chunk_size
-        kb.overlap_size = request.overlap_size
-        kb.hybrid_ratio = request.hybrid_ratio
-        kb.status = "building"
-        kb.is_public = request.is_public
-
-        db.commit()
-        db.refresh(kb)
-
-        # 启动异步重建任务
-        try:
-
-            # 提交后台处理任务
-            processor = TextFileProcessor(db)
-
-            background_tasks.add_task(
-                processor.process_files,
-                kb_id=knowledge_base_id,
-                file_ids=request.file_ids
-            )
-            logger.info(f"Started rebuild task for KB {knowledge_base_id}")
-        except Exception as e:
-            logger.error(f"Failed to start rebuild task: {str(e)}")
+        if not kb:
             raise HTTPException(
-                status_code=500,
-                detail="Failed to start rebuild process"
+                status_code=404,
+                detail=f"知识库{knowledge_base_id}不存在或没有权限修改"
             )
+        if kb.status != "completed":
+            raise HTTPException(
+                status_code=400,
+                detail="知识库状态不允许重建"
+            )
+        try:
+            if request.hybrid_ratio is not None:
+                kb.hybrid_ratio = request.hybrid_ratio
+            if request.description is not None:
+                kb.description = request.description
+            # 更新知识库参数
+            if request.chunk_size is not None and request.chunk_size != kb.chunk_size:
+                kb.chunk_size = request.chunk_size
+                rebuild_required = True
+            if request.overlap_size is not None and request.overlap_size != kb.overlap_size:
+                kb.overlap_size = request.overlap_size
+                rebuild_required = True
+            if rebuild_required:
+                kb.status = "building"
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(500, detail=str(e))
+
+    if rebuild_required:
+        with get_db_with() as db:
+            # 启动异步重建任务
+            try:
+                files = db.query(KnowledgeBaseChunk.file_id).filter(
+                        KnowledgeBaseChunk.knowledge_base_id == knowledge_base_id
+                    ).distinct().all()
+                # 提交后台处理任务
+                processor = TextFileProcessor()
+                file_ids = [id for (id, ) in files]
+
+                db.query(KnowledgeBaseChunk).filter(
+                        KnowledgeBaseChunk.knowledge_base_id == knowledge_base_id
+                    ).delete()
+                db.commit()
+                background_tasks.add_task(
+                    processor.process_files,
+                    kb_id=knowledge_base_id,
+                    file_ids=file_ids,
+                )
+                logger.info(f"Started rebuild task for KB {knowledge_base_id}")
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Failed to start rebuild task: {str(e)}")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to start rebuild process"
+                )
 
         return KnowledgeBaseCreateResponse(
             knowledge_base_id=knowledge_base_id,
-            status=kb.status
+            status="building" if rebuild_required else "completed"
         )
-
-
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(500, detail=str(e))
 
 
 @router.delete(

@@ -14,6 +14,13 @@ class KnowledgeBaseCreate(BaseModel):
     hybrid_ratio: float = 0.5
     is_public: bool = False
 
+class UpdateKnowledgeBaseParamsRequest(BaseModel):
+    """更新知识库参数请求模型"""
+    description: Optional[str] = None
+    chunk_size: Optional[int] = None
+    overlap_size: Optional[int] = None
+    hybrid_ratio: Optional[float] = None
+
 class KnowledgeBaseCreateResponse(BaseModel):
     """知识库创建响应模型"""
     knowledge_base_id: UUID
