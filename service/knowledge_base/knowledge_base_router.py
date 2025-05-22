@@ -211,33 +211,36 @@ async def get_knowledge_base_detail(
     try:
         kb = query_knowledge_base(db, user_id, knowledge_base_id)
         
-        # 查询知识库所关联的文件信息
+        # 合并查询，避免N+1问题，一次性获取所有文件信息
         file_info_query = (
             db.query(
                 KnowledgeBaseChunk.file_id,
                 KnowledgeBaseChunk.file_name,
-                func.count(KnowledgeBaseChunk.id).label('chunk_count')
+                func.count(KnowledgeBaseChunk.id).label('chunk_count'),
+                FileDB.size,
+                FileDB.created_at
             )
+            .join(FileDB, KnowledgeBaseChunk.file_id == FileDB.id)
             .filter(KnowledgeBaseChunk.knowledge_base_id == knowledge_base_id)
-            .group_by(KnowledgeBaseChunk.file_id, KnowledgeBaseChunk.file_name)
+            .group_by(
+                KnowledgeBaseChunk.file_id,
+                KnowledgeBaseChunk.file_name,
+                FileDB.size,
+                FileDB.created_at
+            )
             .all()
         )
-        
-        # 构建文件列表
-        files = []
-        for file_id, file_name, chunk_count in file_info_query:
-            # 获取文件大小和创建时间
-            file_db = db.query(FileDB).filter(FileDB.id == file_id).first()
-            if file_db:
-                files.append(
-                    KnowledgeBaseFile(
-                        file_id=file_id,
-                        file_name=file_name,
-                        file_size=file_db.size,
-                        chunk_count=chunk_count,
-                        created_at=file_db.created_at
-                    )
-                )
+
+        files = [
+            KnowledgeBaseFile(
+                file_id=file_id,
+                file_name=file_name,
+                file_size=size,
+                chunk_count=chunk_count,
+                created_at=created_at
+            )
+            for file_id, file_name, chunk_count, size, created_at in file_info_query
+        ]
 
         return KnowledgeBaseDetailResponse(
             knowledge_base_id=kb.id,
