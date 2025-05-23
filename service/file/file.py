@@ -2,10 +2,24 @@ from fastapi import UploadFile, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from uuid import UUID
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 
 from database.model.file import *
-from rest_model.file import FileMetadata, FileTypeError, FileSizeError
+from rest_model.file import FileMetadata, FileTypeError, FileSizeError, FileCountLimitError
+from .config import MAX_FILES_PER_USER, DEFAULT_MAX_FILE_SIZE_MB, DEFAULT_ALLOWED_FILE_TYPES
+
+async def get_user_file_count(db: Session, user_id: UUID) -> int:
+    """
+    获取用户当前的文件数量
+    
+    Args:
+        db: Database session
+        user_id: UUID of the user
+        
+    Returns:
+        int: 用户当前的文件数量
+    """
+    return db.query(func.count(FileDB.id)).filter(FileDB.user_id == user_id).scalar()
 
 async def upload_to_database(
     file: UploadFile, 
@@ -28,9 +42,23 @@ async def upload_to_database(
         
     Returns:
         UUID of the uploaded file
+        
+    Raises:
+        FileTypeError: If file type is not allowed
+        FileSizeError: If file size exceeds limit
+        FileCountLimitError: If user has reached their file count limit
     """
+    # 检查用户文件数量限制
+    current_count = await get_user_file_count(db, user_id)
+    if current_count >= MAX_FILES_PER_USER:
+        raise FileCountLimitError(f"已达到文件数量上限 ({MAX_FILES_PER_USER} 个文件)")
+
     if file.content_type is None:
         raise FileTypeError("File type is missing")
+    
+    # 如果未指定allowed_types，使用默认值
+    if allowed_types is None:
+        allowed_types = DEFAULT_ALLOWED_FILE_TYPES
     
     if allowed_types and file.content_type not in allowed_types:
         raise FileTypeError(f"File type {file.content_type} not allowed. Allowed types: {', '.join(allowed_types)}")
@@ -38,6 +66,10 @@ async def upload_to_database(
     content = await file.read()
     file_size = len(content)
     
+    # 如果未指定max_size_mb，使用默认值
+    if max_size_mb is None:
+        max_size_mb = DEFAULT_MAX_FILE_SIZE_MB
+        
     if max_size_mb and file_size > max_size_mb * 1024 * 1024:
         raise FileSizeError(f"File size exceeds maximum allowed size of {max_size_mb} MB")
     

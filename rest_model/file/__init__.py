@@ -25,4 +25,10 @@ class FileSizeError(Exception):
     """文件大小错误"""
     def __init__(self, message: str):
         self.message = message
+        super().__init__(self.message)
+
+class FileCountLimitError(Exception):
+    """文件数量超出限制错误"""
+    def __init__(self, message: str):
+        self.message = message
         super().__init__(self.message) 

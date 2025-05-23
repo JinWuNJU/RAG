@@ -6,7 +6,7 @@ from uuid import UUID
 import io
 from fastapi_jwt_auth2 import AuthJWT
 
-from rest_model.file import FileUploadResponse, FileMetadata, FileTypeError, FileSizeError
+from rest_model.file import FileUploadResponse, FileMetadata, FileTypeError, FileSizeError, FileCountLimitError
 from database import get_db
 from service.file.file import upload_to_database, get_file_by_id, get_file_metadata, delete_file, get_user_files
 from service.user import auth
@@ -49,6 +49,8 @@ async def upload_file(
     except FileTypeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except FileSizeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileCountLimitError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/{file_id}/metadata", response_model=FileMetadata)
