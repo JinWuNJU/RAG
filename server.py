@@ -1,8 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_jwt_auth2.exceptions import AuthJWTException
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
 
 from service.ai import chat
 from service.evaluation import router as evaluation_router
@@ -10,12 +8,8 @@ from service.file import file_router
 from service.knowledge_base import knowledge_base_router
 from service.user import user_router
 from service.user.user_router import authjwt_exception_handler
-from service.limit import limiter
 
 app = FastAPI()
-# 添加limiter实例到应用
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,

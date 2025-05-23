@@ -37,7 +37,7 @@ def authjwt_exception_handler(request: Request, exc: Exception):
 
 # 注册接口
 @router.post("/register", response_model=TokenResponse)
-@rate_limit(ip_limit="20/minute")
+@rate_limit(ip_limit="1/second")
 async def register(
     request: Request,
     user: UserCreate,
@@ -68,7 +68,7 @@ async def register(
 
 # 登录接口
 @router.post("/login", response_model=TokenResponse)
-@rate_limit(ip_limit="20/minute")
+@rate_limit(ip_limit="1/second")
 async def login(
     request: Request,
     user: UserLogin,
@@ -87,18 +87,3 @@ async def login(
     # 生成 JWT
     access_token = auth.gen_user_jwt(Authorize, db_user)
     return {"access_token": access_token}
-
-# JWT 测试接口
-@router.get("/test")
-@rate_limit(ip_limit="30/minute", user_limit="15/minute")
-async def test_jwt(
-    request: Request,
-    Authorize: AuthJWT = Depends()
-):
-    # 验证JWT令牌
-    user_id = auth.decode_jwt_to_uid(Authorize)
-    return {
-        "status": "JWT验证成功",
-        "current_user": str(user_id),
-        "test_passed": True
-    }
