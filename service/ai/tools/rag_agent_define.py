@@ -151,10 +151,10 @@ def config_agent(agent: Agent[List[KnowledgeBaseBasicInfo], str]):
         semantic_search,
         prepare=prepare_tool_def
     )  # type: ignore
-    agent.tool(
-        hybrid_search,
-        prepare=prepare_tool_def
-    )  # type: ignore
+    # agent.tool(
+    #     hybrid_search,
+    #     prepare=prepare_tool_def
+    # )  # type: ignore
     agent.tool(
         read_knowledge_base_content,
         prepare=prepare_tool_def
