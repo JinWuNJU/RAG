@@ -17,9 +17,6 @@ from database.model.user import User
 # 创建知识库相关的API路由，设置标签和前缀
 router = APIRouter(tags=["Knowledge Bases"], prefix="/knowledge_bases")
 
-@router.get("/test")
-def test_endpoint():
-    return {"message": "OK1"}
 
 @router.post("/", response_model=KnowledgeBaseCreateResponse)
 async def create_knowledge_base(
@@ -420,18 +417,6 @@ def merge_search_results(
     # 按分数排序
     return sorted(results, key=lambda x: x[1], reverse=True)
 
-# 索引健康检查端点（可选）
-@router.get("/search/status")
-async def check_search_status(db: Session = Depends(get_db)):
-    """检查搜索引擎状态"""
-    try:
-        # 检查PGroonga索引
-        db.execute(text("SELECT pgroonga_command('status')")).fetchone()
-        # 检查向量索引
-        db.execute(text("SELECT ivfflat_probes('ivfflat_embedding_index')"))
-        return {"status": "ok"}
-    except Exception as e:
-        raise HTTPException(503, detail=f"搜索引擎异常: {str(e)}")
 
 
 @router.put("/{knowledge_base_id}/rebuild")
@@ -538,6 +523,132 @@ async def rebuild_knowledge_base(
         )
 
 
+@router.post("/{knowledge_base_id}/files", response_model=KnowledgeBaseCreateResponse)
+async def add_files_to_knowledge_base(
+        knowledge_base_id: UUID,
+        request: KnowledgeBaseFileAddRequest,
+        background_tasks: BackgroundTasks,
+        Authorize: AuthJWT = Depends()
+):
+    """
+    向知识库添加文件（异步处理文件分块）
+
+    参数:
+    - knowledge_base_id: 知识库ID
+    - request: 包含文件信息的请求体，包括：
+        - file_ids: 要添加的文件ID列表(UUID)
+
+    功能:
+    1. 验证知识库存在且属于当前用户
+    2. 验证文件存在且属于当前用户
+    3. 在后台异步处理文件分块：
+       - 使用中文分词库
+       - 根据知识库设置的chunk_size和overlap_size分割文件内容
+       - 将分块存入knowledge_base_chunks表
+
+    返回:
+    - 知识库基本信息，包括knowledge_base_id和状态
+    """
+    user_id = auth.decode_jwt_to_uid(Authorize)
+
+    with get_db_with() as db:
+        # 验证知识库存在且属于当前用户
+        kb = query_knowledge_base(db, user_id, knowledge_base_id)
+
+        if kb.uploader_id != user_id:
+            raise HTTPException(
+                status_code=400,
+                detail="没有修改该知识库的权限"
+            )
+
+        if kb.status != "completed":
+            raise HTTPException(
+                status_code=400,
+                detail="知识库当前状态不允许添加文件"
+            )
+
+        # 验证所有文件存在且属于当前用户
+        existing_files = set()
+        invalid_files = []
+
+        # 分批查询避免SQL语句过长
+        batch_size = 100
+        for i in range(0, len(request.file_ids), batch_size):
+            batch = request.file_ids[i:i + batch_size]
+            files = db.query(FileDB.id).filter(
+                (FileDB.id.in_(batch)) &
+                (FileDB.user_id == user_id)
+            ).all()
+            existing_files.update(f.id for f in files)
+
+        # 找出无效文件
+        invalid_files = [fid for fid in request.file_ids if fid not in existing_files]
+
+        if invalid_files:
+            raise HTTPException(
+                status_code=404,
+                detail=f"以下文件不存在或无权访问: {invalid_files}"
+            )
+
+        # 检查文件是否已经关联到知识库
+        existing_relations = db.query(KnowledgeBaseChunk.file_id).filter(
+            (KnowledgeBaseChunk.knowledge_base_id == knowledge_base_id) &
+            (KnowledgeBaseChunk.file_id.in_(request.file_ids))
+        ).all()
+
+        if existing_relations:
+            existing_ids = {r.file_id for r in existing_relations}
+            raise HTTPException(
+                status_code=400,
+                detail=f"以下文件已经关联到知识库: {existing_ids}"
+            )
+
+        try:
+            # 更新知识库状态
+            kb.status = "building"
+
+
+            db.commit()
+
+            # 提交后台处理任务
+            processor = TextFileProcessor()
+            background_tasks.add_task(
+                processor.process_files,
+                kb_id=kb.id,
+                file_ids=request.file_ids
+            )
+
+            logger.info(
+                f"用户 {user_id} 向知识库 {knowledge_base_id} 添加了 {len(request.file_ids)} 个文件",
+                extra={
+                    "knowledge_base_id": knowledge_base_id,
+                    "file_count": len(request.file_ids),
+                    "file_ids": request.file_ids
+                }
+            )
+
+            return KnowledgeBaseCreateResponse(
+                knowledge_base_id=knowledge_base_id,
+                status="building"
+            )
+
+        except Exception as e:
+            db.rollback()
+            logger.error(
+                f"向知识库 {knowledge_base_id} 添加文件失败: {str(e)}",
+                exc_info=True,
+                extra={
+                    "knowledge_base_id": knowledge_base_id,
+                    "file_ids": request.file_ids,
+                    "error": str(e)
+                }
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=f"添加文件失败: {str(e)}"
+            )
+
+
 @router.delete(
     "/{knowledge_base_id}",
     status_code=204,
@@ -616,6 +727,98 @@ async def delete_knowledge_base(
             status_code=500,
             detail="服务器内部错误"
         )
+
+@router.delete(
+    "/{knowledge_base_id}/files",
+    status_code=204,
+    summary="删除知识库文件",
+    description="从知识库移除文件并删除相关分块数据",
+    responses={
+        204: {"description": "成功删除"},
+        400: {"description": "无效请求参数"},
+        403: {"description": "没有操作权限"},
+        404: {"description": "资源不存在"},
+        500: {"description": "数据库操作失败"}
+    }
+)
+async def remove_files_from_knowledge_base(
+        knowledge_base_id: UUID,
+        request: KnowledgeBaseFileAddRequest,  # 复用新增文件的请求模型
+        db: Session = Depends(get_db),
+        Authorize: AuthJWT = Depends()
+):
+    """
+    删除知识库文件API
+
+    安全规则：
+    - 只有知识库上传者可以操作
+    - 自动级联删除相关分块数据
+    - 数据库事务保证原子性
+
+    注意：仅移除关联关系，不删除原始文件
+    """
+    user_id = auth.decode_jwt_to_uid(Authorize)
+    logger_context = {
+        "knowledge_base_id": knowledge_base_id,
+        "user_id": user_id,
+        "file_ids": request.file_ids
+    }
+
+    try:
+        # 开启事务
+        with db.begin():
+            kb = query_knowledge_base(db, user_id, knowledge_base_id)
+
+            if kb.uploader_id != user_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="没有修改该知识库的权限"
+                )
+            # 验证文件关联关系
+            valid_files = db.query(KnowledgeBaseChunk.file_id).filter(
+                (KnowledgeBaseChunk.knowledge_base_id == knowledge_base_id) &
+                (KnowledgeBaseChunk.file_id.in_(request.file_ids))
+            ).all()
+
+            valid_file_ids = {f.file_id for f in valid_files}
+            invalid_files = set(request.file_ids) - valid_file_ids
+
+            if invalid_files:
+                detail = f"以下文件未关联到知识库: {invalid_files}"
+                logger.warning(detail, extra=logger_context)
+                raise HTTPException(status_code=400, detail=detail)
+
+            # 批量删除分块数据
+            chunk_deletion = db.query(KnowledgeBaseChunk).filter(
+                (KnowledgeBaseChunk.knowledge_base_id == knowledge_base_id) &
+                (KnowledgeBaseChunk.file_id.in_(request.file_ids))
+            ).delete(synchronize_session=False)
+
+            # 删除关联关系
+            db.query(KnowledgeBaseChunk).filter(
+                (KnowledgeBaseChunk.knowledge_base_id == knowledge_base_id) &
+                (KnowledgeBaseChunk.file_id.in_(request.file_ids))
+            ).delete(synchronize_session=False)
+
+            # 记录操作日志
+            logger.info(
+                f"Removed {len(request.file_ids)} files from KB {knowledge_base_id}",
+                extra={**logger_context, "chunks_deleted": chunk_deletion}
+            )
+
+        return {"description": "成功删除"}
+
+    except HTTPException as he:
+        db.rollback()
+        raise he
+    except exc.SQLAlchemyError as e:
+        db.rollback()
+        logger.error(f"Database error: {str(e)}", exc_info=True, extra=logger_context)
+        raise HTTPException(status_code=500, detail="数据库操作失败")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Unexpected error: {str(e)}", exc_info=True, extra=logger_context)
+        raise HTTPException(status_code=500, detail="服务器内部错误")
 
 @router.get(
     "/{knowledge_base_id}/files/{file_id}/download",

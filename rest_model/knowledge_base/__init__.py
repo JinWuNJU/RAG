@@ -117,3 +117,7 @@ class SearchResult(BaseModel):
 
 class SearchScoreResult(SearchResult):
     score: float
+
+class KnowledgeBaseFileAddRequest(BaseModel):
+    file_ids: List[UUID]
+
