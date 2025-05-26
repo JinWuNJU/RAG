@@ -299,6 +299,7 @@ async def get_db_with_retry(max_retries: int = 3, retry_delay: int = 1):
             await asyncio.sleep(retry_delay)
 
 async def main():
+    global QUERY_CNT
     # Set up argument parser
     parser = argparse.ArgumentParser(description='RAG Evaluation Tool')
     parser.add_argument('file_path', type=str, help='Path to the input JSON file containing queries')
@@ -317,7 +318,6 @@ async def main():
         print(f"Error: File {args.file_path} does not exist")
         sys.exit(1)
     
-    global QUERY_CNT
     QUERY_CNT = args.query_cnt
     
     try:
