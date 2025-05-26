@@ -29,7 +29,7 @@ async def prepare_tool_def(ctx: RunContext[List[KnowledgeBaseBasicInfo]], tool_d
     if tool_def.name == knowledge_base_metadata.__name__:
         tool_def.description += '你能够访问的知识库有：' + "\n".join([v.model_dump_json() for v in ctx.deps]) + '''
 在必要时，使用合适的工具获取信息、提供答案，一次请求内可以使用多次相同的或不同的工具，当检索结果不理想时，考虑调整工具参数进行多次尝试，不要一次失败就放弃使用工具。
-为了更加方便用户理解，你应该在调用工具之前告诉用户你的想法，例如“我应该……”，然后生成工具调用部分。
+为了更加方便用户理解，你应该在调用工具之前告诉用户你的想法，例如"我应该……"，然后生成工具调用部分。
 知识库中的所有内容并不都与用户的问题密切相关，你需要结合问题，对搜索结果进行甄别、筛选，并通过数次调整工具关键词关键词来获取更精确的结果。
 在引用结果时，一定要使用[citation:file_id(uuid4):chunk_index(int)]的格式。
 '''
@@ -151,10 +151,10 @@ def config_agent(agent: Agent[List[KnowledgeBaseBasicInfo], str]):
         semantic_search,
         prepare=prepare_tool_def
     )  # type: ignore
-    # agent.tool(
-    #     hybrid_search,
-    #     prepare=prepare_tool_def
-    # )  # type: ignore
+    agent.tool(
+        hybrid_search,
+        prepare=prepare_tool_def
+    )  # type: ignore
     agent.tool(
         read_knowledge_base_content,
         prepare=prepare_tool_def
