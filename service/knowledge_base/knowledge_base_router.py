@@ -794,12 +794,6 @@ async def remove_files_from_knowledge_base(
                 (KnowledgeBaseChunk.file_id.in_(request.file_ids))
             ).delete(synchronize_session=False)
 
-            # 删除关联关系
-            db.query(KnowledgeBaseChunk).filter(
-                (KnowledgeBaseChunk.knowledge_base_id == knowledge_base_id) &
-                (KnowledgeBaseChunk.file_id.in_(request.file_ids))
-            ).delete(synchronize_session=False)
-
             # 记录操作日志
             logger.info(
                 f"Removed {len(request.file_ids)} files from KB {knowledge_base_id}",
