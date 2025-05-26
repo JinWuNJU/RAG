@@ -620,11 +620,6 @@ async def add_files_to_knowledge_base(
 
             logger.info(
                 f"用户 {user_id} 向知识库 {knowledge_base_id} 添加了 {len(request.file_ids)} 个文件",
-                extra={
-                    "knowledge_base_id": knowledge_base_id,
-                    "file_count": len(request.file_ids),
-                    "file_ids": request.file_ids
-                }
             )
 
             return KnowledgeBaseCreateResponse(
@@ -635,13 +630,7 @@ async def add_files_to_knowledge_base(
         except Exception as e:
             db.rollback()
             logger.error(
-                f"向知识库 {knowledge_base_id} 添加文件失败: {str(e)}",
-                exc_info=True,
-                extra={
-                    "knowledge_base_id": knowledge_base_id,
-                    "file_ids": request.file_ids,
-                    "error": str(e)
-                }
+                f"向知识库 {knowledge_base_id} 添加文件失败: {str(e)}"
             )
             raise HTTPException(
                 status_code=500,
@@ -758,11 +747,6 @@ async def remove_files_from_knowledge_base(
     注意：仅移除关联关系，不删除原始文件
     """
     user_id = auth.decode_jwt_to_uid(Authorize)
-    logger_context = {
-        "knowledge_base_id": knowledge_base_id,
-        "user_id": user_id,
-        "file_ids": request.file_ids
-    }
 
     try:
         # 开启事务
@@ -780,12 +764,12 @@ async def remove_files_from_knowledge_base(
                 (KnowledgeBaseChunk.file_id.in_(request.file_ids))
             ).all()
 
-            valid_file_ids = {f.file_id for f in valid_files}
+            valid_file_ids = set([f.file_id for f in valid_files])
             invalid_files = set(request.file_ids) - valid_file_ids
 
             if invalid_files:
                 detail = f"以下文件未关联到知识库: {invalid_files}"
-                logger.warning(detail, extra=logger_context)
+                logger.warning(detail)
                 raise HTTPException(status_code=400, detail=detail)
 
             # 批量删除分块数据
@@ -796,8 +780,7 @@ async def remove_files_from_knowledge_base(
 
             # 记录操作日志
             logger.info(
-                f"Removed {len(request.file_ids)} files from KB {knowledge_base_id}",
-                extra={**logger_context, "chunks_deleted": chunk_deletion}
+                f"Removed {len(request.file_ids)} files from KB {knowledge_base_id}"
             )
 
         return {"description": "成功删除"}
@@ -807,11 +790,11 @@ async def remove_files_from_knowledge_base(
         raise he
     except exc.SQLAlchemyError as e:
         db.rollback()
-        logger.error(f"Database error: {str(e)}", exc_info=True, extra=logger_context)
+        logger.error(f"Database error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="数据库操作失败")
     except Exception as e:
         db.rollback()
-        logger.error(f"Unexpected error: {str(e)}", exc_info=True, extra=logger_context)
+        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="服务器内部错误")
 
 @router.get(
