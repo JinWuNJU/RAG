@@ -1,3 +1,4 @@
+import glob
 import json
 import sys
 from pathlib import Path
@@ -113,11 +114,12 @@ def load_env():
     """Load environment variables from .env file."""
     load_dotenv()
 
+QUERY_CNT = 200  # 默认查询数量
 def read_queries(file_path: str) -> List[Dict]:
     """Read queries from the JSON file."""
     with open(file_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
-    return data[:10]
+    return data[:QUERY_CNT]
 
 async def process_single_query(
     query_data: Dict,
@@ -144,13 +146,10 @@ async def process_single_query(
         
         for retry in range(max_tool_retries):
             try:
-                response = await asyncio.wait_for(
-                    chat_service.agent.run(
+                response = await chat_service.agent.run(
                         query, 
                         deps=[knowledge_base_vo]
-                    ),
-                    timeout=30  # 30秒超时
-                )
+                    )
                 print(f"[DEBUG] Got response: {response}")  # Debug log
                 break
             except Exception as e:
@@ -160,7 +159,7 @@ async def process_single_query(
                 await asyncio.sleep(tool_retry_delay)
         
         # Access the output property of the response
-        answer = response.output if response and hasattr(response, 'output') else str(response) if response else "No response received"
+        answer = response.data if response and hasattr(response, 'data') else str(response) if response else "No response received"
         
         # Get the recorded contexts from the recorder lists
         retrieved_contexts = {
@@ -189,7 +188,7 @@ async def process_queries(queries: List[Dict], chat_service: ChatService, knowle
     """Process queries concurrently."""
     results = []
     queue = asyncio.Queue()
-    max_concurrent_tasks = 10  # 降低并发数以减少压力
+    max_concurrent_tasks = 200  # 降低并发数以减少压力
     max_retries = 5  # 增加重试次数
     tool_retry_delay = 2  # 工具重试延迟时间（秒）
     
@@ -207,10 +206,8 @@ async def process_queries(queries: List[Dict], chat_service: ChatService, knowle
                     # 设置工具调用的超时时间
                     await asyncio.wait_for(
                         process_single_query(query_data, chat_service, knowledge_base, queue),
-                        timeout=30
+                        timeout=300
                     )
-                    # 给数据库一些恢复时间
-                    await asyncio.sleep(1)
                     pbar.update(1)
                     pbar.refresh()
                     break  # 如果成功，跳出重试循环
@@ -310,6 +307,8 @@ async def main():
                        choices=['read_knowledge_base_content', 'semantic_search', 'keyword_search', 'hybrid_search'],
                        default=['read_knowledge_base_content', 'semantic_search', 'keyword_search'],
                        help='Tools to enable for the agent')
+    parser.add_argument('--query-cnt', type=int, default=QUERY_CNT, help='Number of queries to process (default: 200)')
+    
     
     # Parse arguments
     args = parser.parse_args()
@@ -317,6 +316,9 @@ async def main():
     if not Path(args.file_path).exists():
         print(f"Error: File {args.file_path} does not exist")
         sys.exit(1)
+    
+    global QUERY_CNT
+    QUERY_CNT = args.query_cnt
     
     try:
         # Load environment variables
@@ -336,27 +338,37 @@ async def main():
             
             # Get knowledge base from database with retry mechanism
             async with get_db_with_retry() as db:
-                knowledge_base = db.query(KnowledgeBase).get(
+                # Query the knowledge base inside the session, but copy its data for later use
+                kb_obj = db.query(KnowledgeBase).get(
                     uuid.UUID("57f2e448-82e9-49fb-aed8-8a7825819b18")
                 )
+                if kb_obj:
+                    # Detach the object by copying its data to a new instance (or dict)
+                    knowledge_base = KnowledgeBase(
+                        id=kb_obj.id,
+                        name=kb_obj.name,
+                        description=kb_obj.description
+                    )
+                else:
+                    knowledge_base = None
                 if not knowledge_base:
                     raise ValueError("Knowledge base not found")
                 
-                # Read and process queries
-                queries = read_queries(args.file_path)
-                print(f"Processing {len(queries)} queries...")
-                results = await process_queries(queries, chat_service, knowledge_base)
-                
-                # Output results
-                output_json = json.dumps(results, indent=2, ensure_ascii=False)
-                if args.output:
-                    # Write to file if output path is provided
-                    with open(args.output, 'w', encoding='utf-8') as f:
-                        f.write(output_json)
-                    print(f"Results written to {args.output}")
-                else:
-                    # Print to stdout if no output file specified
-                    print(output_json)
+            # Read and process queries
+            queries = read_queries(args.file_path)
+            print(f"Processing {len(queries)} queries...")
+            results = await process_queries(queries, chat_service, knowledge_base)
+            
+            # Output results
+            output_json = json.dumps(results, indent=2, ensure_ascii=False)
+            if args.output:
+                # Write to file if output path is provided
+                with open(args.output, 'w', encoding='utf-8') as f:
+                    f.write(output_json)
+                print(f"Results written to {args.output}")
+            else:
+                # Print to stdout if no output file specified
+                print(output_json)
         finally:
             # Stop all patches
             for p in patches:
