@@ -878,3 +878,36 @@ async def download_knowledge_base_file(
             status_code=500,
             detail="Internal server error"
         )
+
+@router.get("/{knowledge_base_id}/basic", response_model=KnowledgeBaseListItem)
+async def get_knowledge_base_basic(
+    knowledge_base_id: UUID,
+    db: Session = Depends(get_db),
+    Authorize: AuthJWT = Depends()
+) -> KnowledgeBaseListItem:
+    """
+    获取知识库基础信息API
+    
+    参数:
+    - knowledge_base_id: 知识库唯一标识(UUID格式)
+
+    返回:
+    - KnowledgeBaseListItem: 知识库基础信息
+    """
+    user_id = auth.decode_jwt_to_uid(Authorize)
+    try:
+        kb = query_knowledge_base(db, user_id, knowledge_base_id)
+        return KnowledgeBaseListItem(
+            knowledge_base_id=kb.id,
+            name=kb.name,
+            description=kb.description,
+            created_at=kb.created_at,
+            status=kb.status,
+            uploader_id=kb.uploader_id,
+            is_public=kb.is_public
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取知识库基础信息失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
