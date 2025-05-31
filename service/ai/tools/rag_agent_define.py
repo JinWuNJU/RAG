@@ -116,12 +116,16 @@ async def hybrid_search(ctx: RunContext[List[KnowledgeBaseBasicInfo]], knowledge
             return json.dumps([to_jsonable_python(SearchResult(**(v.model_dump()))) for v in result], ensure_ascii=False)
 
 async def read_knowledge_base_content(ctx: RunContext[List[KnowledgeBaseBasicInfo]], file_id: uuid.UUID, chunk_index: List[int]):
-    '''
-    读取知识库的内容，返回指定file_id对应文件chunk_index处的内容，对于一个文件，它的chunk_index是从0开始的顺序增长的整数。
-    你需要先调用其它检索工具来获取感兴趣的file_id和chunk_index。如果发现其它检索工具得到的结果，信息不完整，那么可以使用read_knowledge_base_content工具来查看相邻的chunk_index所存储的内容。
-    建议一次性获取数个chunk_index的内容，以减小可能的错误。
+    f'''
+    读取知识库的内容，返回指定file_id对应文件chunk_index处的内容，对于一个文件，它的chunk_index是从1开始的顺序增长的整数。不要使用0作为chunk_index。
+    file_id和chunk_index可以从其它工具的结果中获取。当用户希望查看某个文件的具体内容时，使用本工具。
+    如果发现从其它检索工具得到的结果，可以推测出所需信息位于相邻的分块，那么可以使用本工具{read_knowledge_base_content.__name__}来查看相邻的chunk_index所存储的内容。
+    不要用本工具来查看已经获得的chunk_index的内容，这样不会提供更多信息。
+    建议一次性获取数个相邻chunk_index的内容，以获得更充足的信息。
     '''
     chunk_index = chunk_index[:10]
+    if 0 in chunk_index:
+        return "分块序号最小为1"
     with get_db_with() as db:
         result = db.query(KnowledgeBaseChunk).where(
             KnowledgeBaseChunk.file_id == file_id).where(KnowledgeBaseChunk.chunk_index.in_(chunk_index)).all()
@@ -134,6 +138,44 @@ async def read_knowledge_base_content(ctx: RunContext[List[KnowledgeBaseBasicInf
                 chunk_index=v.chunk_index,
                 file_name=v.file_name
             )) for v in result], ensure_ascii=False)
+        
+async def list_knowledge_base_files(ctx: RunContext[List[KnowledgeBaseBasicInfo]], knowledge_base_id: uuid.UUID, page: int = 0):
+    f'''
+    列出知识库中的文件列表。
+    你可以用{list_knowledge_base_files.__name__}工具分页获取知识库下所有文件名，当用户进行宽泛的提问，如知识库里都有什么内容时；或者用户明确要求谈论某个文件时，可以使用本工具获取文件名列表。
+    不要告诉用户file_id的具体值，这对他们来说没有意义。
+    '''
+    PAGE_SIZE = 40
+    valid, reason = validate_knowledge_base_id(knowledge_base_id, ctx.deps)
+    if not valid:
+        return reason
+    with get_db_with() as db:
+        q = (
+            db.query(
+                KnowledgeBaseChunk.file_id,
+                KnowledgeBaseChunk.file_name
+            )
+            .filter(KnowledgeBaseChunk.knowledge_base_id == knowledge_base_id)
+            .group_by(
+                KnowledgeBaseChunk.file_id,
+                KnowledgeBaseChunk.file_name
+            )
+            .order_by(KnowledgeBaseChunk.file_id.desc())
+        )
+        files = q.offset(page * PAGE_SIZE).limit(PAGE_SIZE + 1).all()
+        has_more = len(files) > PAGE_SIZE
+        files = files[:PAGE_SIZE]
+        result = [
+            {
+                'file_id': str(file_id),
+                'file_name': file_name
+            }
+            for file_id, file_name in files
+        ]
+        return json.dumps({
+            'files': result,
+            'has_more': has_more
+        }, ensure_ascii=False)
         
 def config_agent(agent: Agent[List[KnowledgeBaseBasicInfo], str]):
     agent.system_prompt(
@@ -157,5 +199,9 @@ def config_agent(agent: Agent[List[KnowledgeBaseBasicInfo], str]):
     # )  # type: ignore
     agent.tool(
         read_knowledge_base_content,
+        prepare=prepare_tool_def
+    )  # type: ignore
+    agent.tool(
+        list_knowledge_base_files,
         prepare=prepare_tool_def
     )  # type: ignore
