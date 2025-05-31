@@ -36,9 +36,10 @@ keyword_search_results = []
 semantic_search_results = []
 hybrid_search_results = []
 
+# 创建一个用于记录原始函数返回值到列表的包装器函数
 def create_recorder(original_func: Callable, record_list: List) -> Callable:
     """
-    Create a wrapper function to record the original function's return value to a list.
+    创建一个包装器函数，将原始函数的返回值记录到列表中。
     """
     @functools.wraps(original_func)
     async def recorder_wrapper(*args, **kwargs):
@@ -47,12 +48,13 @@ def create_recorder(original_func: Callable, record_list: List) -> Callable:
             record_list.append(result)
             return result
         except Exception as e:
-            print(f"[DEBUG] Error in {original_func.__name__}: {str(e)}")  # Debug log
+            tqdm.write(f"[DEBUG] {original_func.__name__} 出错: {str(e)}")  # 调试日志
             raise
     return recorder_wrapper
 
+# 修改版 config_agent，只启用指定工具
 def modified_config_agent(agent, tools: Optional[List[str]] = None) -> None:
-    """Modified version of config_agent that only enables specified tools."""
+    """修改版 config_agent，只启用指定的工具。"""
     if tools is None:
         tools = ['read_knowledge_base_content', 'semantic_search', 'keyword_search']
     
@@ -79,7 +81,6 @@ read_knowledge_base_content_recorder = create_recorder(read_knowledge_base_conte
 keyword_search_recorder = create_recorder(keyword_search, keyword_search_results)
 semantic_search_recorder = create_recorder(semantic_search, semantic_search_results)
 hybrid_search_recorder = create_recorder(hybrid_search, hybrid_search_results)
-
 
 # 保存原始函数的引用
 original_read_knowledge_base_content = read_knowledge_base_content
@@ -110,25 +111,28 @@ def create_modified_config_agent(tools: List[str]):
 # 在 patches 应用后导入 ChatService
 from service.ai.chat.chat_service import ChatService
 
+# 加载环境变量
 def load_env():
-    """Load environment variables from .env file."""
+    """从 .env 文件加载环境变量。"""
     load_dotenv()
 
-QUERY_CNT = 200  # 默认查询数量
+QUERY_CNT = 3  # 默认查询数量
+# 从 JSON 文件读取查询
 def read_queries(file_path: str) -> List[Dict]:
-    """Read queries from the JSON file."""
+    """从 JSON 文件读取查询。"""
     with open(file_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
     return data[:QUERY_CNT]
 
+# 处理单个查询，并将结果放入队列
 async def process_single_query(
     query_data: Dict,
     chat_service: ChatService,
     knowledge_base: KnowledgeBase,
     queue: asyncio.Queue
 ) -> None:
-    """Process a single query and put the result in the queue."""
-    response = None  # Initialize response variable
+    """处理单个查询，并将结果放入队列。"""
+    response = None  # 初始化 response 变量
     try:
         query = query_data['query']
         ground_truth = query_data['answer']
@@ -140,7 +144,7 @@ async def process_single_query(
             description=knowledge_base.description
         )
 
-        # Get response from the chat service with knowledge base as dependency
+        # 使用知识库作为依赖，从 chat service 获取响应
         max_tool_retries = 3
         tool_retry_delay = 2
         
@@ -150,18 +154,18 @@ async def process_single_query(
                         query, 
                         deps=[knowledge_base_vo]
                     )
-                print(f"[DEBUG] Got response: {response}")  # Debug log
+                tqdm.write(f"[DEBUG] 获得响应: {response}")  # 调试日志
                 break
             except Exception as e:
                 if retry == max_tool_retries - 1:
                     raise
-                print(f"[DEBUG] Tool call failed (attempt {retry + 1}/{max_tool_retries}): {str(e)}")
+                tqdm.write(f"[DEBUG] 工具调用失败 (第 {retry + 1}/{max_tool_retries} 次): {str(e)}")
                 await asyncio.sleep(tool_retry_delay)
         
-        # Access the output property of the response
-        answer = response.data if response and hasattr(response, 'data') else str(response) if response else "No response received"
+        # 获取 response 的输出属性
+        answer = response.data if response and hasattr(response, 'data') else str(response) if response else "未收到响应"
         
-        # Get the recorded contexts from the recorder lists
+        # 从 recorder 列表获取记录的上下文
         retrieved_contexts = {
             'read_knowledge_base_content_results': read_knowledge_base_content_results[-1] if read_knowledge_base_content_results else None,
             'keyword_search_results': keyword_search_results[-1] if keyword_search_results else None,
@@ -178,25 +182,26 @@ async def process_single_query(
         
         await queue.put(result)
     except asyncio.TimeoutError:
-        print(f"\nTimeout processing query: {query_data.get('query', 'unknown')}")
+        tqdm.write(f"\n处理查询超时: {query_data.get('query', 'unknown')}")
         await queue.put(None)
     except Exception as e:
-        print(f"\nError processing query '{query_data.get('query', 'unknown')}': {str(e)}")
-        await queue.put(None)  # Put None to indicate error
+        tqdm.write(f"\n处理查询 '{query_data.get('query', 'unknown')}' 出错: {str(e)}")
+        await queue.put(None)  # 用 None 表示出错
 
+# 并发处理多个查询
 async def process_queries(queries: List[Dict], chat_service: ChatService, knowledge_base: KnowledgeBase) -> List[Dict]:
-    """Process queries concurrently."""
+    """并发处理多个查询。"""
     results = []
     queue = asyncio.Queue()
-    max_concurrent_tasks = 200  # 降低并发数以减少压力
-    max_retries = 5  # 增加重试次数
+    max_concurrent_tasks = 200  # 并发数
+    max_retries = 5  # 重试次数
     tool_retry_delay = 2  # 工具重试延迟时间（秒）
     
-    # Create a semaphore to limit concurrent tasks
+    # 创建信号量限制并发任务数
     semaphore = asyncio.Semaphore(max_concurrent_tasks)
     
-    # Create progress bar with dynamic_ncols=True to ensure it stays visible
-    pbar = tqdm(total=len(queries), desc="Processing queries", unit="query", dynamic_ncols=True)
+    # 创建进度条，dynamic_ncols=True 保证进度条可见
+    pbar = tqdm(total=len(queries), desc="处理查询", unit="query", dynamic_ncols=True)
     
     async def process_with_semaphore(query_data: Dict) -> None:
         async with semaphore:
@@ -214,42 +219,42 @@ async def process_queries(queries: List[Dict], chat_service: ChatService, knowle
                 except asyncio.TimeoutError:
                     retries += 1
                     if retries == max_retries:
-                        print(f"\nTimeout after {max_retries} retries for query: {query_data.get('query', 'unknown')}")
+                        tqdm.write(f"\n超时重试 {max_retries} 次后仍失败: {query_data.get('query', 'unknown')}")
                         await queue.put(None)
                         break
-                    print(f"\nTimeout, retrying ({retries}/{max_retries})...")
+                    tqdm.write(f"\n超时，重试中 ({retries}/{max_retries})...")
                     await asyncio.sleep(tool_retry_delay)
                 except OperationalError as e:
                     retries += 1
                     if retries == max_retries:
-                        print(f"\nDatabase connection failed after {max_retries} retries for query: {query_data.get('query', 'unknown')}")
+                        tqdm.write(f"\n数据库连接失败，重试 {max_retries} 次后仍失败: {query_data.get('query', 'unknown')}")
                         await queue.put(None)
                         break
-                    print(f"\nDatabase connection failed, retrying ({retries}/{max_retries})...")
+                    tqdm.write(f"\n数据库连接失败，重试中 ({retries}/{max_retries})...")
                     await asyncio.sleep(tool_retry_delay)
                 except Exception as e:
                     if "Tool exceeded max retries count" in str(e) or "ValidationError" in str(e):
                         retries += 1
                         if retries == max_retries:
-                            print(f"\nTool retry limit exceeded after {max_retries} attempts for query: {query_data.get('query', 'unknown')}")
+                            tqdm.write(f"\n工具重试次数超限，已重试 {max_retries} 次: {query_data.get('query', 'unknown')}")
                             await queue.put(None)
                             break
-                        print(f"\nTool retry failed, retrying ({retries}/{max_retries})...")
+                        tqdm.write(f"\n工具重试失败，重试中 ({retries}/{max_retries})...")
                         await asyncio.sleep(tool_retry_delay)
                     else:
-                        print(f"\nError in task for query '{query_data.get('query', 'unknown')}': {str(e)}")
+                        tqdm.write(f"\n任务出错: 查询 '{query_data.get('query', 'unknown')}'，错误信息: {str(e)}")
                         await queue.put(None)
                         break
     
-    # Create tasks for all queries
+    # 为所有查询创建任务
     tasks = []
     for i, query_data in enumerate(queries):
         task = asyncio.create_task(process_with_semaphore(query_data))
         tasks.append(task)
     
-    print(f"\nCreated {len(tasks)} tasks for processing")
+    tqdm.write(f"\n已创建 {len(tasks)} 个任务用于处理查询")
     
-    # Wait for all tasks to complete
+    # 等待所有任务完成
     try:
         pending = set(tasks)
         while pending:
@@ -261,30 +266,33 @@ async def process_queries(queries: List[Dict], chat_service: ChatService, knowle
                 try:
                     await task  # 检查任务是否有异常
                 except Exception as e:
-                    print(f"\nTask failed: {str(e)}")
+                    tqdm.write(f"\n任务失败: {str(e)}")
     except Exception as e:
-        print(f"\nError during task execution: {str(e)}")
+        tqdm.write(f"\n任务执行过程中出错: {str(e)}")
     finally:
         pbar.close()
     
-    print("\nAll tasks completed")
+    tqdm.write("\n所有任务已完成")
     
-    # Collect results from queue
-    print("Collecting results from queue...")
+    # 从队列收集结果
+    tqdm.write("正在从队列收集结果...")
     for _ in range(len(queries)):
         try:
             result = await queue.get()
             if result is not None:
                 results.append(result)
         except Exception as e:
-            print(f"\nError collecting result: {str(e)}")
+            tqdm.write(f"\n收集结果时出错: {str(e)}")
     
-    print(f"\nSuccessfully processed {len(results)} out of {len(queries)} queries")
+    tqdm.write(f"\n成功处理 {len(results)} / {len(queries)} 个查询")
     return results
 
+# 数据库连接重试机制
+default_max_db_retries = 3
+default_db_retry_delay = 1
 @asynccontextmanager
-async def get_db_with_retry(max_retries: int = 3, retry_delay: int = 1):
-    """Get database connection with retry mechanism."""
+async def get_db_with_retry(max_retries: int = default_max_db_retries, retry_delay: int = default_db_retry_delay):
+    """获取数据库连接，带重试机制。"""
     retries = 0
     while retries < max_retries:
         try:
@@ -295,33 +303,33 @@ async def get_db_with_retry(max_retries: int = 3, retry_delay: int = 1):
             retries += 1
             if retries == max_retries:
                 raise
-            print(f"Database connection failed, retrying ({retries}/{max_retries})...")
+            tqdm.write(f"数据库连接失败，重试中 ({retries}/{max_retries})...")
             await asyncio.sleep(retry_delay)
 
+# 主程序入口
 async def main():
     global QUERY_CNT
-    # Set up argument parser
-    parser = argparse.ArgumentParser(description='RAG Evaluation Tool')
-    parser.add_argument('file_path', type=str, help='Path to the input JSON file containing queries')
-    parser.add_argument('-o', '--output', type=str, help='Path to output JSON file (optional)')
+    # 设置参数解析器
+    parser = argparse.ArgumentParser(description='RAG 评估工具')
+    parser.add_argument('file_path', type=str, help='输入查询 JSON 文件路径')
+    parser.add_argument('-o', '--output', type=str, help='输出 JSON 文件路径（可选）')
     parser.add_argument('--agent-tools', nargs='+', 
                        choices=['read_knowledge_base_content', 'semantic_search', 'keyword_search', 'hybrid_search'],
                        default=['read_knowledge_base_content', 'semantic_search', 'keyword_search'],
-                       help='Tools to enable for the agent')
-    parser.add_argument('--query-cnt', type=int, default=QUERY_CNT, help='Number of queries to process (default: 200)')
+                       help='为 agent 启用的工具')
+    parser.add_argument('--query-count', type=int, default=QUERY_CNT, help='要处理的查询数量 (默认: 200)')
     
-    
-    # Parse arguments
+    # 解析参数
     args = parser.parse_args()
     
     if not Path(args.file_path).exists():
-        print(f"Error: File {args.file_path} does not exist")
+        tqdm.write(f"错误: 文件 {args.file_path} 不存在")
         sys.exit(1)
-    
-    QUERY_CNT = args.query_cnt
+
+    QUERY_CNT = args.query_count
     
     try:
-        # Load environment variables
+        # 加载环境变量
         load_env()
         
         config_agent_patch = None
@@ -333,17 +341,17 @@ async def main():
             )
             config_agent_patch.start()
             
-            # Create chat service
+            # 创建 chat service
             chat_service = ChatService()
             
-            # Get knowledge base from database with retry mechanism
+            # 使用重试机制从数据库获取知识库
             async with get_db_with_retry() as db:
-                # Query the knowledge base inside the session, but copy its data for later use
+                # 在会话内查询知识库，并复制其数据以便后续使用
                 kb_obj = db.query(KnowledgeBase).get(
-                    uuid.UUID("57f2e448-82e9-49fb-aed8-8a7825819b18")
+                    uuid.UUID("ab1e4787-cdf2-4117-af12-89657177c00d")
                 )
                 if kb_obj:
-                    # Detach the object by copying its data to a new instance (or dict)
+                    # 通过复制数据将对象分离（或转为 dict）
                     knowledge_base = KnowledgeBase(
                         id=kb_obj.id,
                         name=kb_obj.name,
@@ -352,31 +360,31 @@ async def main():
                 else:
                     knowledge_base = None
                 if not knowledge_base:
-                    raise ValueError("Knowledge base not found")
+                    raise ValueError("未找到知识库")
                 
-            # Read and process queries
+            # 读取并处理查询
             queries = read_queries(args.file_path)
-            print(f"Processing {len(queries)} queries...")
+            tqdm.write(f"正在处理 {len(queries)} 个查询...")
             results = await process_queries(queries, chat_service, knowledge_base)
             
-            # Output results
+            # 输出结果
             output_json = json.dumps(results, indent=2, ensure_ascii=False)
             if args.output:
-                # Write to file if output path is provided
+                # 如果指定输出路径则写入文件
                 with open(args.output, 'w', encoding='utf-8') as f:
                     f.write(output_json)
-                print(f"Results written to {args.output}")
+                tqdm.write(f"结果已写入 {args.output}")
             else:
-                # Print to stdout if no output file specified
-                print(output_json)
+                # 未指定输出文件则打印到标准输出
+                tqdm.write(output_json)
         finally:
-            # Stop all patches
+            # 停止所有 patches
             for p in patches:
                 p.stop()
             if config_agent_patch:
                 config_agent_patch.stop()
     except Exception as e:
-        print(f"Error: {str(e)}")
+        tqdm.write(f"错误: {str(e)}")
         sys.exit(1)
 
 if __name__ == "__main__":
