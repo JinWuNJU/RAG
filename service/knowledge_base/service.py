@@ -38,15 +38,19 @@ class TextFileProcessor:
             if not kb:
                 raise ValueError(f"知识库 {kb_id} 不存在")
 
-            success_count = 0
-            for file_id in file_ids:
-                try:
-                    if await self._process_single_file(file_id, kb, db):
-                        success_count += 1
-                except Exception as e:
-                    logger.error(f"文件 {file_id} 处理失败: {str(e)}")
-                    continue
-
+        success_count = 0
+        for file_id in file_ids:
+            try:
+                if await self._process_single_file(file_id, kb):
+                    success_count += 1
+            except Exception as e:
+                logger.error(f"文件 {file_id} 处理失败: {str(e)}")
+                continue
+            
+        with get_db_with() as db:
+            kb = db.query(KnowledgeBase).get(kb_id)
+            if not kb:
+                raise ValueError(f"知识库 {kb_id} 不存在")
             # 更新知识库状态
             try:
                 kb.status = "completed"
@@ -65,17 +69,19 @@ class TextFileProcessor:
 
 
 
-    async def _process_single_file(self, file_id: UUID, kb: KnowledgeBase, db: Session) -> bool:
+    async def _process_single_file(self, file_id: UUID, kb: KnowledgeBase) -> bool:
         """处理单个文本文件"""
         # 1. 从数据库获取文本内容
-        file_record = db.query(FileDB).filter_by(id=file_id).first()
-        if not file_record:
-            logger.warning(f"文件 {file_id} 不存在")
-            return False
+        with get_db_with() as db:
+            file_record = db.query(FileDB).filter_by(id=file_id).first()
+
+            if not file_record:
+                logger.warning(f"文件 {file_id} 不存在")
+                return False
+            
+            db.expunge(file_record)
+
         # 2. 转换成文本
-
-
-
         try:
             extractor = Extractor()
             reader, metadata = extractor.extract_bytes(bytearray(file_record.data))
@@ -104,7 +110,7 @@ class TextFileProcessor:
         embeddings = await self._generate_embeddings(chunks)
 
         # 5. 保存分块和嵌入向量
-        self._save_chunks_with_embeddings(kb.id, file_id, file_record.filename, chunks, embeddings, db)
+        self._save_chunks_with_embeddings(kb.id, file_id, file_record.filename, chunks, embeddings)
         return True
 
     async def _generate_embeddings(self, chunks: List[str]) -> List[Optional[np.ndarray]]:
@@ -211,23 +217,23 @@ class TextFileProcessor:
         return adjusted_chunks
 
     def _save_chunks_with_embeddings(self, kb_id: UUID, file_id: UUID, filename: str,
-                                   chunks: List[str], embeddings: List[Optional[np.ndarray]], db: Session):
+                                   chunks: List[str], embeddings: List[Optional[np.ndarray]]):
         """批量保存分块和嵌入向量到数据库"""
         if len(chunks) != len(embeddings):
             raise ValueError("分块数量和嵌入向量数量不匹配")
+        with get_db_with() as db:
+            db_chunks = []
+            for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+                db_chunk = KnowledgeBaseChunk(
+                    knowledge_base_id=kb_id,
+                    file_id=file_id,
+                    chunk_index=i + 1, # 从1开始
+                    content=chunk,
+                    file_name=filename,
+                    embedding=embedding.tolist() if embedding is not None else None
+                )
+                db_chunks.append(db_chunk)
 
-        db_chunks = []
-        for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
-            db_chunk = KnowledgeBaseChunk(
-                knowledge_base_id=kb_id,
-                file_id=file_id,
-                chunk_index=i + 1, # 从1开始
-                content=chunk,
-                file_name=filename,
-                embedding=embedding.tolist() if embedding is not None else None
-            )
-            db_chunks.append(db_chunk)
-
-        db.bulk_save_objects(db_chunks)
-        db.commit()
-        logger.info(f"文件 {filename} 已分块存储: {len(chunks)} 个分块 (其中 {sum(e is not None for e in embeddings)} 个有嵌入向量)")
+            db.bulk_save_objects(db_chunks)
+            db.commit()
+            logger.info(f"文件 {filename} 已分块存储: {len(chunks)} 个分块 (其中 {sum(e is not None for e in embeddings)} 个有嵌入向量)")
