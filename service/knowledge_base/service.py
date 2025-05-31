@@ -231,18 +231,3 @@ class TextFileProcessor:
         db.bulk_save_objects(db_chunks)
         db.commit()
         logger.info(f"文件 {filename} 已分块存储: {len(chunks)} 个分块 (其中 {sum(e is not None for e in embeddings)} 个有嵌入向量)")
-
-
-
-# def search_in_knowledge_base(db: Session, kb_id: UUID, query: str) -> List[dict]:
-#     """执行全文检索"""
-#     return db.execute(
-#         text("""
-#         SELECT content, file_name, file_id, chunk_index
-#         FROM knowledge_base_chunks
-#         WHERE knowledge_base_id = :kb_id
-#         AND content &@~ :query
-#         LIMIT 20
-#         """),
-#         {"kb_id": str(kb_id), "query": query}
-#     ).fetchall()
