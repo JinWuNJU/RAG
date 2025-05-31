@@ -85,11 +85,8 @@ class TextFileProcessor:
         try:
             extractor = Extractor()
             reader, metadata = extractor.extract_bytes(bytearray(file_record.data))
-            text_content = ""
-            buffer = reader.read(4096)  # 每次读取4KB
-            while len(buffer) > 0:
-                text_content += buffer.decode('utf-8', errors='replace')  # 处理编码问题
-                buffer = reader.read(4096)
+            buffer = reader.read(len(file_record.data)) # 读取全部内容，如果分块读取可能会导致编码问题
+            text_content = buffer.decode('utf-8', errors='replace')
 
         except UnicodeDecodeError:
             logger.error(f"文件 {file_id} 不是有效的文件")
