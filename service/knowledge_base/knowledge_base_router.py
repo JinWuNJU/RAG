@@ -192,12 +192,9 @@ async def get_knowledge_base_detail(
       - chunk_size: 文档分块大小
       - overlap_size: 分块重叠大小
       - hybrid_ratio: 混合检索比例
-      - files: 知识库关联的文件列表，包含:
-        - file_id: 文件ID
-        - file_name: 文件名称
-        - file_size: 文件大小
+      - files_info: 文件统计信息，包含:
+        - file_count: 文件数量
         - chunk_count: 分块数量
-        - created_at: 文件创建时间
 
 
     错误码:
@@ -207,41 +204,17 @@ async def get_knowledge_base_detail(
     user_id = auth.decode_jwt_to_uid(Authorize)
     try:
         kb = query_knowledge_base(db, user_id, knowledge_base_id)
-        
         if kb.status == "completed":
-            # 合并查询，避免N+1问题，一次性获取所有文件信息，且不包含文件内容
-            file_info_query = (
-                db.query(
-                    KnowledgeBaseChunk.file_id,
-                    KnowledgeBaseChunk.file_name,
-                    func.count(KnowledgeBaseChunk.id).label('chunk_count'),
-                    FileDB.size,
-                    FileDB.created_at
-                )
-                .join(FileDB, KnowledgeBaseChunk.file_id == FileDB.id)
-                .filter(KnowledgeBaseChunk.knowledge_base_id == knowledge_base_id)
-                .group_by(
-                    KnowledgeBaseChunk.file_id,
-                    KnowledgeBaseChunk.file_name,
-                    FileDB.size,
-                    FileDB.created_at
-                )
-                .all()
-            )
-
-            files = [
-                KnowledgeBaseFile(
-                    file_id=file_id,
-                    file_name=file_name,
-                    file_size=size,
-                    chunk_count=chunk_count,
-                    created_at=created_at
-                )
-                for file_id, file_name, chunk_count, size, created_at in file_info_query
-            ]
+            # 统计文件数和分块数
+            file_count = db.query(func.count(func.distinct(KnowledgeBaseChunk.file_id))).filter(
+                KnowledgeBaseChunk.knowledge_base_id == knowledge_base_id
+            ).scalar() or 0
+            chunk_count = db.query(func.count(KnowledgeBaseChunk.id)).filter(
+                KnowledgeBaseChunk.knowledge_base_id == knowledge_base_id
+            ).scalar() or 0
         else:
-            files = []
-
+            file_count = 0
+            chunk_count = 0
         return KnowledgeBaseDetailResponse(
             knowledge_base_id=kb.id,
             name=kb.name,
@@ -253,9 +226,11 @@ async def get_knowledge_base_detail(
             hybrid_ratio=kb.hybrid_ratio,
             uploader_id=kb.uploader_id,
             is_public=kb.is_public,
-            files=files
+            files_info=KnowledgeBaseFilesInfo(
+                file_count=file_count,
+                chunk_count=chunk_count
+            )
         )
-
     except HTTPException:
         raise  # 直接抛出已知的HTTP异常
     except Exception as e:
@@ -319,8 +294,16 @@ async def get_hybrid_search_results(kb: KnowledgeBase, request: SearchRequest, d
     vector_results = await get_vector_search_results(db, kb.id, request.query, request.limit * 2)
 
     # 处理结果
-    text_chunks, text_scores = zip(*text_results) if text_results else ([], [])
-    vector_chunks, vector_scores = zip(*vector_results) if vector_results else ([], [])
+    if text_results:
+        text_chunks, text_scores = zip(*text_results)
+        text_chunks, text_scores = list(text_chunks), list(text_scores)
+    else:
+        text_chunks, text_scores = [], []
+    if vector_results:
+        vector_chunks, vector_scores = zip(*vector_results)
+        vector_chunks, vector_scores = list(vector_chunks), list(vector_scores)
+    else:
+        vector_chunks, vector_scores = [], []
 
     # 归一化分数
     text_scores_norm = normalize_scores(text_scores) if text_scores else []
@@ -372,13 +355,13 @@ def normalize_scores(scores: List[float]) -> List[float]:
     if not scores:
         return []
 
-    scores_arr = np.array(scores)
+    scores_arr = np.array(scores, dtype=float)
     if np.all(scores_arr == scores_arr[0]):  # 所有分数相同
         return [0.5] * len(scores_arr)
 
     scaler = MinMaxScaler()
     normalized = scaler.fit_transform(scores_arr.reshape(-1, 1)).flatten()
-    return normalized.tolist()
+    return normalized.astype(float).tolist()
 
 
 def merge_search_results(
@@ -913,4 +896,53 @@ async def get_knowledge_base_basic(
         raise
     except Exception as e:
         logger.error(f"获取知识库基础信息失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/{knowledge_base_id}/files", response_model=KnowledgeBaseFilesResponse)
+async def get_knowledge_base_files(
+    knowledge_base_id: UUID,
+    db: Session = Depends(get_db),
+    Authorize: AuthJWT = Depends()
+) -> KnowledgeBaseFilesResponse:
+    """
+    获取知识库文件详细列表API
+    """
+    user_id = auth.decode_jwt_to_uid(Authorize)
+    try:
+        kb = query_knowledge_base(db, user_id, knowledge_base_id)
+        if kb.status != "completed":
+            return KnowledgeBaseFilesResponse(files=[])
+        file_info_query = (
+            db.query(
+                KnowledgeBaseChunk.file_id,
+                KnowledgeBaseChunk.file_name,
+                func.count(KnowledgeBaseChunk.id).label('chunk_count'),
+                FileDB.size,
+                FileDB.created_at
+            )
+            .join(FileDB, KnowledgeBaseChunk.file_id == FileDB.id)
+            .filter(KnowledgeBaseChunk.knowledge_base_id == knowledge_base_id)
+            .group_by(
+                KnowledgeBaseChunk.file_id,
+                KnowledgeBaseChunk.file_name,
+                FileDB.size,
+                FileDB.created_at
+            )
+            .all()
+        )
+        files = [
+            KnowledgeBaseFile(
+                file_id=file_id,
+                file_name=file_name,
+                file_size=size,
+                chunk_count=chunk_count,
+                created_at=created_at
+            )
+            for file_id, file_name, chunk_count, size, created_at in file_info_query
+        ]
+        return KnowledgeBaseFilesResponse(files=files)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取知识库文件列表失败: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")

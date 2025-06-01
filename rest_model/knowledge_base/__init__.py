@@ -72,8 +72,15 @@ class KnowledgeBaseFile(BaseModel):
             UUID: lambda v: str(v)  # UUID转为字符串
         }
 
+class KnowledgeBaseFilesInfo(BaseModel):
+    file_count: int
+    chunk_count: int
+
+class KnowledgeBaseFilesResponse(BaseModel):
+    files: List[KnowledgeBaseFile]
+
 class KnowledgeBaseDetailResponse(BaseModel):
-    """知识库列表项响应模型"""
+    """知识库详情响应模型"""
     knowledge_base_id: UUID
     name: str
     description: Optional[str]
@@ -84,7 +91,7 @@ class KnowledgeBaseDetailResponse(BaseModel):
     chunk_size: int
     overlap_size: int
     hybrid_ratio: float
-    files: List[KnowledgeBaseFile] = []
+    files_info: KnowledgeBaseFilesInfo
 
     class Config:
         json_encoders = {
