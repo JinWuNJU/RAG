@@ -140,7 +140,8 @@ async def list_knowledge_bases(
                     created_at=kb.created_at,
                     status=kb.status,
                     uploader_id=kb.uploader_id,
-                    is_public=kb.is_public
+                    is_public=kb.is_public,
+                    used_count=kb.used_count
                 ) for kb in knowledge_bases
             ],
             total=total,
@@ -890,7 +891,8 @@ async def get_knowledge_base_basic(
             created_at=kb.created_at,
             status=kb.status,
             uploader_id=kb.uploader_id,
-            is_public=kb.is_public
+            is_public=kb.is_public,
+            used_count=kb.used_count
         )
     except HTTPException:
         raise

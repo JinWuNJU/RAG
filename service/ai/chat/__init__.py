@@ -11,33 +11,47 @@ from service.user import auth
 
 router = APIRouter()
 
-def get_chat_service() -> BaseChatService:
+async def get_chat_service() -> BaseChatService:
     if os.getenv("MOCKING_CHAT", "true").lower() == "false":
-        return ChatService()
+        service = ChatService()
+        await service.initialize()
+        return service
     return MockChatService()
 
-chat_service = get_chat_service()
+chat_service = None
 
 @router.get("/chats/{chat_id}")
 async def get_chat(chat_id: str, Authorize: AuthJWT = Depends()):
     """获取单个对话详情接口"""
     user_id = auth.decode_jwt_to_uid(Authorize)
+    global chat_service
+    if chat_service is None:
+        chat_service = await get_chat_service()
     return await chat_service.get_chat(user_id, chat_id)
 
 @router.get("/chats")
 async def get_history(page: int = 1, Authorize: AuthJWT = Depends()):
     """获取对话历史接口"""
     user_id = auth.decode_jwt_to_uid(Authorize)
+    global chat_service
+    if chat_service is None:
+        chat_service = await get_chat_service()
     return await chat_service.get_history(user_id, page)
 
 @router.post("/completions")
 async def message_stream(payload: MessagePayload, Authorize: AuthJWT = Depends()):
     """处理用户消息并返回SSE事件流"""
     user_id = auth.decode_jwt_to_uid(Authorize)
+    global chat_service
+    if chat_service is None:
+        chat_service = await get_chat_service()
     return await chat_service.message_stream(user_id, payload)
 
 @router.delete("/chats/{chat_id}")
 async def delete_chat(chat_id: str, Authorize: AuthJWT = Depends()):
     """删除对话接口"""
     user_id = auth.decode_jwt_to_uid(Authorize)
+    global chat_service
+    if chat_service is None:
+        chat_service = await get_chat_service()
     return await chat_service.delete_chat(user_id, chat_id)

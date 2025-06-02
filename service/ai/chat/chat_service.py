@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Deque, List
 from typing import Optional
+import asyncio
 
 from fastapi import HTTPException
 from fastapi.logger import logger
@@ -82,6 +83,39 @@ class ChatService(BaseChatService):
             system_prompt='根据用户提问内容及助手的回答内容，生成对话标题。标题应简洁明了，能够准确概括对话的主题和内容。你的回答仅包含标题本身。标题不超过20个字。',
         )
         
+        # 初始化计数字典
+        self.kb_usage_counts: dict[uuid.UUID, int] = {}
+        self._update_task = None
+        
+    async def initialize(self):
+        """异步初始化方法"""
+        if self._update_task is None:
+            self._update_task = asyncio.create_task(self._update_loop())
+        
+    async def _update_loop(self):
+        """更新循环"""
+        while True:
+            await asyncio.sleep(60)  # 每分钟更新一次
+            await self._update_kb_counts()
+        
+    async def _update_kb_counts(self):
+        """更新知识库使用次数"""
+        if not self.kb_usage_counts:
+            return
+            
+        with get_db_with() as db:
+            try:
+                for kb_id, count in self.kb_usage_counts.items():
+                    kb = db.query(KnowledgeBase).get(kb_id)
+                    if kb:
+                        kb.used_count = kb.used_count + count
+                db.commit()
+                # 清空计数字典
+                self.kb_usage_counts.clear()
+            except Exception as e:
+                logger.error(f"更新知识库使用次数失败: {str(e)}")
+                db.rollback()
+    
     @contextmanager
     def _get_chat_db(self, user_id: uuid.UUID, chat_id: str):
         '''
@@ -305,6 +339,9 @@ class ChatService(BaseChatService):
                 logger.warning("Agent: query %s returned None", payload.content)
 
     async def message_stream(self, user_id: uuid.UUID, payload: MessagePayload) -> EventSourceResponse:
+        # 确保更新任务已启动
+        await self.initialize()
+        
         with get_db_with() as db:
             is_create_new_chat = False
             history_item = None
@@ -329,6 +366,12 @@ class ChatService(BaseChatService):
                 )
                 db.add(history_item)
                 db.commit()
+                
+                # 如果是新对话且使用了知识库，增加计数
+                if payload.knowledgeBase:
+                    for kb_id in payload.knowledgeBase:
+                        self.kb_usage_counts[kb_id] = self.kb_usage_counts.get(kb_id, 0) + 1
+                
             else:
                 if history_item.user_id != user_id:
                     raise HTTPException(status_code=403, detail="没有权限访问该对话")

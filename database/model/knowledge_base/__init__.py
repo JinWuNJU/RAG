@@ -26,6 +26,7 @@ class KnowledgeBase(Base):
     hybrid_ratio: Mapped[float] = mapped_column(Float, server_default='0.5')
     is_public: Mapped[bool] = mapped_column(Boolean, server_default='false', nullable=False)
     uploader_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey('users.id'), nullable=False)
+    used_count: Mapped[int] = mapped_column(Integer, server_default='0', nullable=False)
 
     uploader: Mapped["User"] = relationship("User", back_populates="knowledge_bases")
 
@@ -35,6 +36,7 @@ class KnowledgeBase(Base):
         CheckConstraint('chunk_size > 0', name='check_chunk_size_positive'),
         CheckConstraint('overlap_size >= 0', name='check_overlap_size_non_negative'),
         CheckConstraint('hybrid_ratio BETWEEN 0 AND 1', name='check_hybrid_ratio_range'),
+        CheckConstraint('used_count >= 0', name='check_used_count_non_negative'),
 
         # Index on status column
         Index('idx_knowledge_bases_status', 'status'),

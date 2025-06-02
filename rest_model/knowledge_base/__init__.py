@@ -43,8 +43,9 @@ class KnowledgeBaseListItem(KnowledgeBaseBasicInfo):
     """知识库列表项响应模型"""
     created_at: datetime
     status: str  # "building" 或 "completed"
-    uploader_id:UUID
+    uploader_id: UUID
     is_public: bool
+    used_count: int
 
     class Config:
         json_encoders = {
